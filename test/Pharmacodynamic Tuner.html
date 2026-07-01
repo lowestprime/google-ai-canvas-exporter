@@ -1,0 +1,2035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pharmacodynamic Tuner</title>
+
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Icons">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+
+    <style>
+
+      
+      :root {
+        --on-surface-default: #E6E8F0; --on-surface-de-emphasis: #ADAFB8; --on-surface-primary: #99C3FF;
+        --on-primary: #0A0A0A; --surface: #101218; --surface-container: #22232B; --surface-container-high: #2A2B36;
+        --surface-container-lowest: var(--surface); --surface-container-low: var(--surface-container); --surface-container-highest: var(--surface-container-high);
+        --outline: var(--stroke-default); --outline-variant: var(--stroke-emphasis);
+        --primary: #5292F9; --primary-hover: #75ABFB; --highlight: #223A94;
+        --stroke-default: #2D2F38; --stroke-emphasis: #ADAFB8;
+        --positive: #90E58C; --positive-surface: #1F3025; --negative: #FF878F; --negative-surface: #381A21;
+        --blue: #5292F9; --green: #90E58C; --yellow: #F5B84F; --red: #FF878F; --purple: #A56EFF; --orange: #FFB787;
+        --chart-1: var(--blue); --chart-2: var(--green); --chart-3: var(--yellow); --chart-4: var(--red); --chart-5: var(--purple);
+        --tertiary: var(--chart-3);
+        --on-tertiary: var(--surface);
+        --ff-sans: "Google Sans", "Roboto", sans-serif;
+        --fs-100: 0.75rem; --fs-200: 0.875rem; --fs-300: 1rem; --fs-400: 1.125rem; --fs-500: 1.25rem; --fs-600: 1.5rem;
+        --fw-regular: 400; --fw-medium: 500; --fw-bold: 700;
+        --space-xs: 0.5rem; --space-s: 0.75rem; --space-m: 1rem; --space-l: 1.5rem;
+        --radius-sm: 4px; --radius-md: 8px; --radius-full: 999px;
+      }
+
+      
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+      html, body { height: 100%; overflow: hidden; font-family: var(--ff-sans); font-size: var(--fs-300); line-height: 1.5; background: transparent; color: var(--on-surface-default); }
+      h1, h2, h3 { font-weight: var(--fw-medium); line-height: 1.25; }
+      h1 { font-size: var(--fs-600); } h2 { font-size: var(--fs-500); } h3 { font-size: var(--fs-400); }
+
+      
+      .widget-container { background: var(--surface); height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+      .viz-container { 
+        position: relative; 
+        overflow: hidden; 
+        flex: 1 1 0;
+        min-height: 200px;
+        display: flex;
+        flex-direction: column;
+        padding: 0 16px; 
+        overflow: hidden;
+        border-radius: 16px;
+      }
+      .flex { display: flex; }
+      .flex-col { display: flex; flex-direction: column; }
+      .flex-row { display: flex; flex-direction: row; }
+      .flex-wrap { flex-wrap: wrap; }
+      .grow { flex-grow: 1; }
+      .shrink-0 { flex-shrink: 0; }
+      .items-center { align-items: center; } .items-baseline { align-items: baseline; } .justify-between { justify-content: space-between; } .justify-center { justify-content: center; }
+      .gap-s { gap: var(--space-s); } .gap-m { gap: var(--space-m); } .gap-xs { gap: 0.25rem; } .gap-xxs { gap: 0.125rem; }
+      .p-s { padding: var(--space-s); } .p-m { padding: var(--space-m); } .px-m { padding-left: var(--space-m); padding-right: var(--space-m); } .py-s { padding-top: var(--space-s); padding-bottom: var(--space-s); }
+      .m-m { margin: var(--space-m); } .mt-m { margin-top: var(--space-m); }
+      .border-t { border-top: 1px solid var(--stroke-default); } .rounded-md { border-radius: var(--radius-md); }
+      .bg-surface { background-color: var(--surface); } .bg-surface-container { background-color: var(--surface-container); }
+      .relative { position: relative; } .w-full, .w-100 { width: 100%; } .w-min-content { min-width: min-content; } .h-full, .h-100 { height: 100%; }
+      .hidden { display: none !important; }
+
+      .widget-ui-part {
+        padding: 24px 0 16px;
+        gap: 4px 16px;
+      }
+
+      .widget-ui-part h3 {
+        font-size: 20px;
+        font-weight: 500;
+      }
+
+      .control-grid { 
+        display: grid !important;
+        grid-template-columns: 1fr 1fr; 
+        gap: 16px 20px; 
+        width: 100%; 
+        padding: 16px 0 0;
+        align-items: end;
+        flex: 0 1 auto;
+        max-height: 50vh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        z-index: 10;
+      }
+
+      @media (max-width: 600px) {
+        .control-grid { grid-template-columns: 1fr; max-height: 40vh; }
+      }
+
+      .section-header {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
+      
+      .type-segmented {
+      }
+
+      .full-width { grid-column: 1 / -1 !important; }
+
+      .section-header {
+        font-size: 0.65rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        color: var(--on-surface-de-emphasis);
+        margin-top: 8px; margin-bottom: -4px;
+        opacity: 0.8;
+        border-bottom: none;
+      }
+
+      .field-group { 
+        display: flex; flex-direction: column; gap: 8px;
+        min-width: 0; width: 100%;
+      }
+
+      .btn-toggle {
+        height: 40px;
+        display: inline-flex; align-items: center; justify-content: center;
+        padding: 0 20px;
+        border-radius: 12px;
+        border: none;
+        
+        background-color: var(--surface-container-highest);
+        color: var(--on-surface-default);
+        
+        font-size: 0.875rem; font-weight: 500;
+        cursor: pointer; 
+        transition: background-color 0.2s, color 0.2s, transform 0.1s;
+        white-space: nowrap;
+        user-select: none;
+        
+        flex: 1 1 22%; /* Fits 4 on a row, or expands to fill gaps */
+        min-width: 120px;
+        
+        position: relative; overflow: hidden; isolation: isolate;
+      }
+      
+      .btn-toggle:hover {
+        background-color: var(--outline-variant);
+      }
+      
+      .btn-toggle:active {
+        transform: scale(0.96); 
+      }
+
+      .btn-toggle.selected {
+        background-color: var(--primary);
+        color: var(--on-primary);
+      }
+      
+      .btn-toggle.selected:hover {
+        background-color: var(--primary-hover);
+      }
+
+      .btn-toggle::before {
+        content: ""; position: absolute; inset: 0;
+        background: currentColor;
+        opacity: 0; transition: opacity 0.2s;
+        pointer-events: none; z-index: -1;
+      }
+      .btn-toggle:hover::before { opacity: 0.08; }
+      .viz-half { position: relative; overflow: hidden; }
+      .flex-wrap { flex-wrap: wrap; }
+      .border-l { border-left: 1px solid var(--stroke-default); }
+      .grid { display: grid; }
+      .grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+      .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+      .grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+      .grid-cols-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+      .grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+      
+      @media (min-width: 640px) { 
+          .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+          .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+          .md\:grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+      }
+
+      
+      .text-primary { color: var(--on-surface-primary); fill: var(--on-surface-primary); }
+      .text-de-emphasis { color: var(--on-surface-de-emphasis); fill: var(--on-surface-de-emphasis); }
+      .text-negative { color: var(--negative); fill: var(--negative); }
+      .text-positive { color: var(--positive); fill: var(--positive); }
+      .caption { font-size: var(--fs-100); color: var(--on-surface-de-emphasis); line-height: 1.4; fill: var(--on-surface-de-emphasis); font-variant-numeric: tabular-nums; }
+      .fw-bold { font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+      .text-center { text-align: center; }
+      .text-xs { font-size: 0.75rem; }
+      .text-sm { font-size: 0.875rem; }
+      .text-l { font-size: 1.125rem; }
+      .text-xl { font-size: 1.25rem; }
+      .font-mono { font-family: monospace; }
+      
+      .btn { 
+        display: inline-flex; align-items: center; justify-content: center; 
+        gap: var(--space-xs);
+        height: 40px;
+        padding: 0 16px;
+        font-size: 0.875rem; font-weight: 500;
+        border-radius: 12px;
+        cursor: pointer; border: none; position: relative; overflow: hidden;
+        transition: all 0.2s;
+        white-space: nowrap;
+        flex-shrink: 0;
+        text-overflow: ellipsis;
+      }
+      .btn:active { transform: scale(0.98); }
+
+      .btn-group { 
+        width: 100%;
+        display: flex !important; 
+        flex-direction: row !important; 
+        flex-wrap: nowrap;
+        gap: 8px;
+        border: none; padding: 0;
+        align-items: stretch;
+      }
+      
+      .btn-group.full-width {
+        grid-column: 1 / -1;
+        margin-top: 8px;
+      }
+
+      .btn-group.compact {
+        grid-column: auto; 
+        margin-top: 0;
+      }
+
+      .btn-group .btn { 
+        flex: 1; 
+        min-width: 0; 
+      }
+
+      .btn::after {
+        content: ""; position: absolute;
+        top: 50%; left: 50%;
+        width: 100%; height: 100%;
+        background: currentColor;
+        border-radius: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .btn:active::after {
+        transform: translate(-50%, -50%) scale(2.5);
+        opacity: 0.12;
+        transition: 0s;
+      }
+
+      .btn:not(:active)::after {
+        transition: opacity 0.3s, transform 0.3s;
+      }
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .btn--primary { background: var(--primary); color: var(--on-primary); }
+      .btn--primary:hover:not(:disabled) { background: var(--primary-hover); }
+      .btn--secondary { background: var(--surface-container-high); color: var(--on-surface-default); }
+      .btn--secondary:hover:not(:disabled) { background: var(--surface-container); }
+      .btn--icon { padding: var(--space-s); width: 2.5rem; height: 2.5rem; border-radius: 50%; }
+      .btn--s { padding: 4px 12px; font-size: var(--fs-200); height: 28px; }
+      .btn--l { padding: 0 var(--space-l); font-size: var(--fs-400); height: 48px; }
+      .btn--xl { height: 64px; font-size: var(--fs-500); }
+      
+      .field-header {
+        display: flex; justify-content: space-between; width: 100%;
+        font-size: 1rem; color: var(--on-surface-de-emphasis); font-weight: 500;
+        white-space: nowrap;
+        letter-spacing: 0.01em;
+        color: var(--on-surface-default);
+      }
+      
+      .field-group:has(.toggle) label {
+        font-weight: 500;
+      }
+      .field-header-value { 
+        font-variant-numeric: tabular-nums; 
+        font-weight: 400;
+        color: var(--on-surface-de-emphasis);
+      }
+
+      .slider {
+        -webkit-appearance: none; appearance: none;
+        width: 100%; height: 20px;
+        background: transparent; cursor: pointer;
+      }
+      .slider::-webkit-slider-runnable-track {
+        width: 100%; height: 4px; border-radius: 2px; 
+        background: linear-gradient(to right, var(--primary) var(--progress), var(--surface-container-highest) var(--progress));
+      }
+      .slider::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        height: 16px; width: 16px; border-radius: 50%;
+        background: var(--primary);
+        border: 2px solid var(--surface);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        margin-top: -6px;
+        transition: transform 0.1s;
+      }
+      .slider:active::-webkit-slider-thumb { transform: scale(1.3); }
+
+      .btn, .segment-btn, .toggle {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+      }
+
+      .btn::before, .segment-btn::before {
+        content: ""; position: absolute; inset: 0;
+        background: currentColor;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+        z-index: 0; /* Behind text */
+      }
+      .btn:hover::before, .segment-btn:hover::before { opacity: 0.08; }
+      .btn:focus-visible::before { opacity: 0.12; }
+
+       .segment-group {
+         display: flex; 
+         width: 100%;
+         background-color: var(--surface-container-high);
+         padding: 4px;
+         border-radius: 8px;
+         gap: 0;
+         position: relative;
+         box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+       }
+
+       .segment-btn {
+         flex: 1;
+         position: relative;
+         background: transparent;
+         border: none; 
+         color: var(--on-surface-de-emphasis);
+         padding: 9px 2px;
+         font-size: 0.75rem; font-weight: 600;
+         cursor: pointer;
+         border-radius: 6px;
+         transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+         z-index: 1;
+         white-space: nowrap;
+         overflow: hidden;
+         text-overflow: ellipsis;
+       }
+
+       .segment-btn:hover {
+         color: var(--on-surface-default);
+       }
+
+       .segment-btn.selected {
+         background-color: var(--surface);
+         color: var(--primary);
+         font-weight: 700;
+         
+         box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 1px rgba(0,0,0,0.05);
+         
+         transform: scale(0.98); 
+       }
+       
+       @media (prefers-color-scheme: dark) {
+           .segment-btn.selected {
+               background-color: var(--surface-container-lowest);
+               color: var(--primary-hover);
+           }
+       }
+
+      .toggle {
+        appearance: none;
+        width: 44px; height: 24px;
+        border: 2px solid var(--outline);
+        border-radius: 100px;
+        background: var(--surface-container-highest);
+        position: relative; cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+        flex-shrink: 0;
+      }
+      .toggle::after {
+        content: ""; position: absolute;
+        top: 50%; transform: translateY(-50%); left: 5px;
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        background: var(--outline); 
+        transition: all 0.2s;
+      }
+      .toggle:checked { background: var(--primary); border-color: var(--primary); }
+      .toggle:checked::after { 
+        background: var(--on-primary); 
+        left: calc(100% - 18px);
+        width: 14px; height: 14px; 
+      }
+
+      .toggle:hover::after {
+        background: var(--on-surface-default);
+      }
+      .toggle:checked:hover::after {
+        background: var(--surface-container-lowest); 
+      }
+      .toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      select.form-input {
+        appearance: none;
+        width: 100%; height: 40px;
+        padding: 0 32px 0 12px;
+        background-color: var(--surface-container-low);
+        border: 1px solid var(--outline);
+        border-radius: 8px;
+        
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' height='24' viewBox='0 -960 960 960' width='24' fill='%235F6368'%3E%3Cpath d='M480-345 240-585l56-56 184 184 184-184 56 56-240 240Z'/%3E"); 
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        background-size: 16px;
+      }
+      .form-input, select {
+        appearance: none; display: block; width: 100%; 
+        height: 32px; /* Reduced from 36px */
+        padding: 0 8px;
+        background: transparent; border: 1px solid var(--stroke-default); border-radius: 4px;
+        color: var(--on-surface-default); font-family: inherit; font-size: 0.85rem;
+        transition: all 0.2s;
+      }
+      .form-input:focus, select:focus {
+        border-color: var(--primary); outline: none;
+      }
+      .form-input::placeholder { color: var(--on-surface-de-emphasis); opacity: 0.6; }
+
+      .checkbox {
+        appearance: none;
+        width: 18px; height: 18px;
+        border: 2px solid var(--on-surface-de-emphasis);
+        border-radius: 2px;
+        background: transparent;
+        position: relative;
+        cursor: pointer;
+        display: inline-block;
+        vertical-align: middle;
+        transition: all 0.1s;
+      }
+      .checkbox:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+      .checkbox:checked {
+        background-color: var(--primary);
+        border-color: var(--primary);
+      }
+
+      .checkbox:checked::after {
+        content: '';
+        position: absolute;
+        left: 5px; top: 1px;
+        width: 5px; height: 10px;
+        border: solid var(--on-primary);
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+
+      .flex-row { flex-direction: row; }
+      .material-icons { font-family: 'Material Icons'; font-weight: normal; font-style: normal; font-size: 20px; line-height: 1; vertical-align: middle; display: inline-block; }
+      .material-symbols-outlined { font-family: 'Material Icons'; font-weight: normal; font-style: normal; font-size: 24px; line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; word-wrap: normal; direction: ltr; -webkit-font-feature-settings: 'liga'; }
+      .alert { padding: var(--space-m); border-radius: var(--radius-md); font-size: var(--fs-200); }
+      .alert--positive { background: var(--positive-surface); color: var(--positive); }
+
+      .viz-badges {
+        position: absolute; top: 12px; right: 12px;
+        display: flex; gap: 8px; 
+        pointer-events: none; z-index: 50;
+      }
+      
+      .badge {
+        background: var(--surface-container-high);
+        color: var(--on-surface-de-emphasis);
+        backdrop-filter: blur(4px);
+        padding: 4px 8px 4px 6px;
+        border-radius: 12px;
+        font-size: 11px; font-weight: 500;
+        display: flex; align-items: center; gap: 4px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        opacity: 0; animation: badgeFade 0.5s ease-out forwards 0.5s;
+        border: 1px solid var(--stroke-default);
+      }
+      .badge .material-icons { font-size: 14px; }
+      @keyframes badgeFade { from { opacity: 0; transform: translateY(-5px); } to { opacity: 0.9; transform: translateY(0); } }
+
+      .ai-watermark {
+        position: fixed;
+        bottom: 6px; right: 8px;
+        font-size: 10px; font-family: sans-serif;
+        color: var(--on-surface-de-emphasis); opacity: 0.5;
+        pointer-events: none; z-index: 100;
+
+        background: var(--surface); 
+        padding: 2px 5px; border-radius: 4px;
+      }
+
+      input.field-group, select.field-group,
+      input.form-field, select.form-field {
+        display: block !important;
+        flex: none !important;
+        width: 100% !important;
+      }
+
+      .form-field {
+         display: flex; flex-direction: column; gap: 4px; width: 100%;
+      }
+    
+    </style>
+
+
+    <script>
+        window.enableDynamicBorders = false;
+        window.enableWidgetV3Styling = false;
+        window.printComments = false;
+        window.isDarkMode = true;
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.16"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+</head>
+<body style="height:100%;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);margin:0;width:calc(100% - 1px)">
+
+    <div id="resize-target" style="min-height:100vh;height:100vh"></div>
+
+    <script>
+
+        if (window.d3) {
+            const originalStyle = d3.selection.prototype.style;
+            d3.selection.prototype.style = function(name, value, priority) {
+                if (typeof name === 'object' && name !== null) {
+                    for (const key in name) {
+                        originalStyle.call(this, key, name[key]);
+                    }
+                    return this;
+                }
+                return originalStyle.call(this, name, value, priority);
+            };
+            
+            const originalAttr = d3.selection.prototype.attr;
+            d3.selection.prototype.attr = function(name, value) {
+                if (typeof name === 'object' && name !== null) {
+                    for (const key in name) {
+                        originalAttr.call(this, key, name[key]);
+                    }
+                    return this;
+                }
+                return originalAttr.call(this, name, value);
+            };
+        }
+
+        if (!window.WIDGET_INIT_DATA) window.WIDGET_INIT_DATA = null;
+
+        window.addEventListener('message', (e) => {
+            if (e.data?.type === 'set-theme') {
+                document.documentElement.setAttribute('data-theme', e.data.theme);
+                setTimeout(() => window.dispatchEvent(new CustomEvent('themeChanged')), 0);
+            }
+        });
+
+        window.WH = window.WidgetHelpers = {
+            lerp: (start, end, t) => start * (1 - t) + end * t,
+            clamp: (num, min, max) => Math.min(Math.max(num, min), max),
+            map: (value, low1, high1, low2, high2) => low2 + (high2 - low2) * (value - low1) / (high1 - low1),
+            random: (min, max) => Math.random() * (max - min) + min,
+            _el: (e) => (typeof e === 'string' ? document.getElementById(e.startsWith('#') ? e.slice(1) : e) : e),
+            _getViz: (e) => {
+                 let el = window.WH._el(e);
+                 if (!el && typeof e === 'string') {
+                     if (e === 'vizTop') el = document.getElementById('viz-top');
+                     if (e === 'vizBottom') el = document.getElementById('viz-bottom');
+                 }
+                 
+                 if (el && el.classList.contains('widget-container')) {
+                     return el.querySelector('.viz-container') || el.querySelector('#viz') || el;
+                 }
+                 return el;
+            },
+
+            normalizeData: (data) => {
+                // Case 1: User passed a single object instead of array
+                if (data && !Array.isArray(data) && typeof data === 'object') {
+                    return [data];
+                }
+                // Case 2: User passed simple array of numbers [10, 20, 5] 
+                // Plot expects objects often, or needs explicit x/y mapping.
+                // We can auto-map simple arrays to objects: [{x:0, y:10}, {x:1, y:20}]
+                if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'number') {
+                    return data.map((val, i) => ({ x: i, y: val, val: val }));
+                }
+                return data;
+            },
+
+            showError: (msg) => {
+                /* console.error(msg); */
+            },
+
+            addBadge: (icon, text, isAuto = false) => {
+                const ALLOWED_ICONS = ['touch_app', '3d_rotation', 'pan_tool', 'mouse', 'hand_gesture', 'zoom_in'];
+                if (!ALLOWED_ICONS.includes(icon)) return;
+
+                let c = document.getElementById('viz-badges');
+                if (!c) {
+                    const viz = document.querySelector('.viz-container');
+                    if(viz) { c = document.createElement('div'); c.id='viz-badges'; c.className='viz-badges'; viz.appendChild(c); }
+                }
+                if (!c) return;
+
+                if (!isAuto) {
+                    c.setAttribute('data-user-modified', 'true');
+                    const autoBadges = c.querySelectorAll('[data-auto="true"]');
+                    autoBadges.forEach(b => b.remove());
+                } else {
+                    if (c.hasAttribute('data-user-modified')) return;
+                }
+
+                const existing = Array.from(c.children).find(b => b.innerHTML.includes(icon));
+                if (existing) {
+                    existing.innerHTML = '<span class="material-icons">' + icon + '</span> ' + text;
+                    return;
+                }
+
+                const b = document.createElement('div');
+                b.className = 'badge';
+                if (isAuto) b.setAttribute('data-auto', 'true');
+                b.innerHTML = '<span class="material-icons">' + icon + '</span> ' + text;
+                c.appendChild(b);
+            },
+
+            createApp: (config) => {
+                // FIX: Prevent LLM from calling createApp twice and wiping the DOM
+                if (window.WH._appCreated) {
+                    throw new Error("Fatal: WH.createApp() called twice. It must be called exactly once.");
+                }
+                window.WH._appCreated = true;
+
+                const state = config?.state;
+                const root = document.body;
+                root.style.cssText = 'height:100%; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); margin:0;';
+                
+                const existing = root.querySelectorAll('.widget-ui-part');
+                existing.forEach(e => e.remove());
+
+                const header = document.createElement('div');
+                header.className = 'widget-ui-part flex flex-wrap justify-between items-baseline bg-surface shrink-0';
+                header.innerHTML = '<h3 class="text-sm w-min-content fw-bold m-0">' + (config.title || 'Widget') + '</h3><div id="app-status" class="caption font-mono"></div>';
+                root.appendChild(header);
+
+                const viz = document.createElement('div');
+                viz.id = 'viz';
+                viz.className = 'widget-ui-part viz-container grow bg-surface-container relative overflow-hidden';
+
+                const badges = document.createElement('div');
+                badges.id = 'viz-badges';
+                badges.className = 'viz-badges';
+                viz.appendChild(badges);
+                
+                root.appendChild(viz);
+
+                const controls = document.createElement('div');
+                controls.id = 'controls-root';
+                controls.className = 'widget-ui-part bg-surface shrink-0 w-full control-grid';
+
+                controls.style.display = 'flex';
+                controls.style.flexWrap = 'wrap';
+                root.appendChild(controls);
+
+                const api = {
+                    vizId: 'viz',
+                    setStatus: (t) => { const el = document.getElementById('app-status'); if(el) el.textContent = t; },
+                    
+                   _dedupe: (key) => {
+                       if (!key) return;
+                       const existing = controls.querySelector(`[data-state-key="${key}"]`);
+                       if (existing) existing.remove();
+                   },
+
+                    splitViz: (fraction = 0.5) => {
+                        const viz = document.getElementById('viz');
+                        viz.innerHTML = ''; 
+                        viz.style.display = 'flex';
+                        viz.style.flexDirection = 'column';
+                        
+                        let size = typeof fraction === 'number' ? (fraction * 100) + '%' : fraction;
+                        
+                        const top = document.createElement('div');
+                        top.id = 'viz-top';
+                        top.className = 'relative overflow-hidden';
+                        top.style.height = size;
+                        top.style.flexShrink = '0';
+                        
+                        const bottom = document.createElement('div');
+                        bottom.id = 'viz-bottom';
+                        bottom.className = 'grow relative overflow-hidden border-t bg-surface'; 
+                        
+                        viz.appendChild(top);
+                        viz.appendChild(bottom);
+                        
+                        const badges = document.createElement('div');
+                        badges.id = 'viz-badges'; badges.className = 'viz-badges';
+                        top.appendChild(badges);
+
+                        return { vizTop: 'viz-top', vizBottom: 'viz-bottom' };
+                    },
+
+                    addSection: (title) => {
+                        const el = document.createElement('div');
+                        el.style.height = '8px';
+                        el.style.width = '100%';
+                        el.style.gridColumn = '1 / -1';
+                        controls.appendChild(el);
+                    },
+
+                    addSlider: (label, opts, onInput) => {
+                        if (opts.key) api._dedupe(opts.key);
+
+                        let min = Number(opts.min || 0);
+                        let max = Number(opts.max || 100);
+                        if (min > max) [min, max] = [max, min];
+                        const activeState = window.WH._activeState || state;
+                        let val = Number(opts.value);
+                        if (activeState && opts.key && activeState[opts.key] !== undefined) {
+                            val = Number(activeState[opts.key]);
+                        }
+                        if (isNaN(val)) val = (min + max) / 2;
+                        val = Math.max(min, Math.min(max, val));
+                        const step = opts.step ? Number(opts.step) : (max - min <= 10 ? (max - min) / 100 : 1);
+
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'field-group type-slider';
+                        if (opts.width === 'full') wrapper.classList.add('full-width');
+                        if (opts.key) wrapper.setAttribute('data-state-key', opts.key);
+
+                        const id = 'inp-' + (label.replace(/[^a-zA-Z0-9]/g, '-') + Math.random().toString(36).substr(2, 4));
+                        wrapper.innerHTML = '<div class="field-header"><label for="' + id + '">' + label + '</label><span id="' + id + '-val" style="font-variant-numeric:tabular-nums;"></span></div><input id="' + id + '" type="range" class="slider" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '">';
+                        controls.appendChild(wrapper);
+                        
+                        const el = wrapper.querySelector('input');
+                        const valEl = wrapper.querySelector('span');
+
+                        const updateUI = (v) => {
+                            const numV = Number(v); 
+                            const displayV = (Number.isInteger(step) && Number.isInteger(numV)) ? numV : numV.toFixed(2);
+                            valEl.innerHTML = '<span class="field-header-value">' + displayV + (opts.unit || '') + '</span>' 
+                            el.style.setProperty('--progress', (((numV - min) / (max - min)) * 100) + '%');
+                        };
+
+                        const update = () => {
+                            const v = parseFloat(el.value);
+                            updateUI(v);
+                            if (activeState && opts.key) activeState[opts.key] = v;
+                            else if (onInput) try { onInput(v); } catch (e) {}
+                        };
+
+                        el.addEventListener('input', update);
+
+                        el._updateValue = (v) => {
+                            el.value = v;
+                            update(); 
+                        };
+
+                        if (opts.key) {
+                            window.addEventListener('widget-state-update', (e) => {
+                                if (e.detail.key === opts.key && parseFloat(el.value) !== e.detail.value) {
+                                    el.value = e.detail.value;
+                                    updateUI(e.detail.value);
+                                }
+                            });
+                        }
+                        updateUI(val);
+                        return { el, setValue: el._updateValue }; 
+                    },
+
+                    updateSlider: (label, value) => {
+                        const labels = Array.from(controls.querySelectorAll('label'));
+                        const target = labels.find(l => l.textContent.trim() === label);
+                        if (target) {
+                            const inputId = target.getAttribute('for');
+                            const input = document.getElementById(inputId);
+                            if (input && input._updateValue) input._updateValue(value);
+                        }
+                    },
+
+                    updateButton: (currentLabel, newLabel) => {
+                        const buttons = Array.from(controls.querySelectorAll('button'));
+                        const target = buttons.find(b => b.textContent.trim() === currentLabel);
+                        if (target) target.textContent = newLabel;
+                    },
+                    
+                    addSelect: (label, options, onChange) => {
+                        const activeState = window.WH._activeState || state;
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'field-group';
+                        
+                        let optsData = options;
+                        let key = null;
+                        let cb = null;
+
+                        if (!Array.isArray(options) && typeof options === 'object') {
+                            optsData = options.options || [];
+                            key = options.key;
+                            if (options.width === 'full') wrapper.classList.add('full-width');
+                        } 
+
+                        else {
+                            optsData = options || [];
+                            if (onChange && typeof onChange === 'object' && onChange.key) {
+                                key = onChange.key;
+                                if (onChange.width === 'full') wrapper.classList.add('full-width');
+                            } 
+                            else if (typeof onChange === 'function') {
+                                cb = onChange;
+                            }
+                        }
+
+                        const safeOpts = optsData.map(o => (typeof o === 'object' ? o : { value: o, label: o }));
+                        const optsHtml = safeOpts.map(o => '<option value="' + o.value + '">' + o.label + '</option>').join('');
+                        
+                        wrapper.innerHTML = '<div class="field-header"><label>' + label + '</label></div><select class="form-input">' + optsHtml + '</select>';
+                        controls.appendChild(wrapper);
+                        const el = wrapper.querySelector('select');
+
+                        if (key && activeState && activeState[key] !== undefined) {
+                            el.value = activeState[key];
+                        }
+
+                        el.addEventListener('change', (e) => {
+                            let val = e.target.value;
+                            
+                            const originalOpt = safeOpts.find(o => String(o.value) === val);
+                            if (originalOpt && typeof originalOpt.value === 'number') {
+                                val = Number(val);
+                            }
+
+                            if (activeState && key) {
+                                activeState[key] = val;
+                            }
+                            if (cb) cb(val);
+                        });
+                    },
+
+                    addButtonGroup: (btns) => {
+                        const group = document.createElement('div');
+                        group.className = 'btn-group field-group';
+                        
+                        if (btns.length <= 2) {
+                            group.classList.add('compact');
+                        } else {
+                            group.classList.add('full-width');
+                        }
+                        
+                        btns.forEach(b => {
+                            const btn = document.createElement('button');
+                            btn.className = 'btn btn--' + (b.variant || 'secondary');
+                            btn.textContent = b.label;
+                            btn.onclick = b.onClick;
+                            
+                            btn.style.flex = '1';
+                            btn.style.minWidth = '0'; 
+                            
+                            group.appendChild(btn);
+                        });
+                        controls.appendChild(group);
+                    },
+
+                    addButton: (label, onClick, variant = 'secondary') => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'field-group'; 
+                        const btn = document.createElement('button');
+                        btn.className = `btn btn--${variant}`;
+                        btn.style.width = '100%';
+                        btn.textContent = label;
+                        btn.onclick = onClick;
+                        wrapper.appendChild(btn);
+                        controls.appendChild(wrapper);
+                    },
+
+                    addToggle: (label, initial, onChange) => {
+                        let key = null;
+                        let cb = null;
+                        let isChecked = initial;
+                        let widthClass = '';
+
+                        if (typeof initial === 'object' && initial !== null && initial.key) {
+                            key = initial.key;
+                            if (initial.width === 'full') widthClass = 'full-width';
+                            isChecked = false; 
+                        } else if (onChange && typeof onChange === 'object' && onChange.key) {
+                            key = onChange.key;
+                            if (onChange.width === 'full') widthClass = 'full-width';
+                        } else if (typeof onChange === 'function') {
+                            cb = onChange;
+                        }
+                        
+                        if (key) api._dedupe(key);
+                        const activeState = window.WH._activeState || state;
+                        if (activeState && key && activeState[key] !== undefined) {
+                            isChecked = activeState[key];
+                        }
+                        
+                        const btn = document.createElement('button');
+                        btn.className = `btn-toggle ${widthClass} ${isChecked ? 'selected' : ''}`;
+                        if (key) btn.setAttribute('data-state-key', key);
+                        btn.setAttribute('aria-pressed', isChecked);
+                        btn.textContent = label;
+                        
+                        controls.appendChild(btn);
+                        
+                        const update = (newState) => {
+                            if (activeState && key) activeState[key] = newState;
+                            if (typeof cb === 'function') cb(newState);
+                            
+                            if (newState) {
+                                btn.classList.add('selected');
+                                btn.setAttribute('aria-pressed', 'true');
+                            } else {
+                                btn.classList.remove('selected');
+                                btn.setAttribute('aria-pressed', 'false');
+                            }
+                        };
+                        
+                        btn.onclick = () => {
+                            const newState = !btn.classList.contains('selected');
+                            update(newState);
+                        };
+                        
+                        if (key) {
+                            window.addEventListener('widget-state-update', (e) => {
+                                if (e.detail.key === key) {
+                                    const newState = !!e.detail.value;
+                                    if (btn.classList.contains('selected') !== newState) update(newState);
+                                }
+                            });
+                        }
+                    },
+
+                    addSegmentedControl: (label, options, onChange) => {
+                        const activeState = window.WH._activeState || state;
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'field-group type-segmented'; 
+                        
+                        let isFull = false;
+                        if (!Array.isArray(options) && typeof options === 'object' && options.width === 'full') isFull = true;
+                        else if (onChange && onChange.width === 'full') isFull = true;
+                        if (isFull) wrapper.classList.add('full-width');
+                        
+                        let optsData = [];
+                        let key = null;
+                        let cb = null;
+                        
+                        if (!Array.isArray(options) && typeof options === 'object' && options !== null) {
+                            optsData = Array.isArray(options.options) ? options.options : [];
+                            key = options.key;
+                            if (activeState && key) cb = (v) => activeState[key] = v;
+                        } else {
+                            optsData = Array.isArray(options) ? options : [];
+                            if (onChange && typeof onChange === 'object' && onChange.key) {
+                                key = onChange.key;
+                                if (activeState) cb = (v) => activeState[key] = v;
+                            } else if (typeof onChange === 'function') {
+                                cb = onChange;
+                            }
+                        }
+
+                        const safeOpts = optsData.map(o => {
+                            if (typeof o === 'object' && o !== null) return o;
+                            return { label: String(o), value: o };
+                        });
+
+                        wrapper.innerHTML = '<div class="field-header"><label>' + label + '</label></div>';
+                        const segmentGroup = document.createElement('div');
+                        segmentGroup.className = 'segment-group';
+                        
+                        const buttons = [];
+                        safeOpts.forEach(opt => {
+                            const btn = document.createElement('button');
+                            btn.className = 'segment-btn';
+                            btn.textContent = opt.label;
+                            btn.onclick = () => {
+                                buttons.forEach(b => b.classList.remove('selected'));
+                                btn.classList.add('selected');
+                                if (activeState && key) activeState[key] = opt.value;
+                                if (cb) cb(opt.value);
+                            };
+                            buttons.push(btn);
+                            segmentGroup.appendChild(btn);
+                        });
+
+                        wrapper.appendChild(segmentGroup);
+                        controls.appendChild(wrapper);
+
+                        const syncUI = (val) => {
+                            let matchFound = false;
+                            buttons.forEach((btn, i) => {
+                                const opt = safeOpts[i];
+                                const match = (opt.value == val) || (opt.label == val); 
+                                if (match) { btn.classList.add('selected'); matchFound = true; }
+                                else btn.classList.remove('selected');
+                            });
+                            if (!matchFound && buttons.length > 0) {
+                                buttons[0].classList.add('selected');
+                            }
+                        };
+
+                        let currentVal = safeOpts.length > 0 ? safeOpts[0].value : null;
+                        if (activeState && key && activeState[key] !== undefined) currentVal = activeState[key];
+                        syncUI(currentVal);
+
+                        if (key) {
+                            window.addEventListener('widget-state-update', (e) => {
+                                if (e.detail.key === key) syncUI(e.detail.value);
+                            });
+                        }
+                    },
+                };
+
+                return new Proxy(api, {
+                    get: (target, prop) => {
+                        if (prop in target) return target[prop];
+                        
+                        if (['canvas', 'ctx', 'controls'].includes(prop)) return null;
+
+                        return () => {}; 
+                    }
+                });
+            },
+
+            createState: (initialObj) => {
+                const listeners = new Set();
+                const proxy = new Proxy(initialObj, {
+                    set: (target, prop, value) => {
+                        if (target[prop] === value) return true;
+
+                       if (typeof value === 'object' && value !== null && 
+                           typeof target[prop] === 'object' && target[prop] !== null) {
+                           try {
+                               if (JSON.stringify(value) === JSON.stringify(target[prop])) return true;
+                           } catch(e) { /* Ignore circular refs, fallback to update */ }
+                       }
+
+                        target[prop] = value;
+                        listeners.forEach(fn => fn(prop, value)); // Notify listeners
+                        
+                        window.dispatchEvent(new CustomEvent('widget-state-update', { 
+                            detail: { key: prop, value: value } 
+                        }));
+                        return true;
+                    }
+                });
+                proxy._subscribe = (fn) => listeners.add(fn);
+                
+                window.WH._activeState = proxy;
+                return proxy;
+            },
+
+            el: (e) => window.WH._el(e),
+            setText: (id, t) => { const e = window.WH._el(id); if(e) e.textContent = t; },
+            on: (id, ev, fn) => { const e = window.WH._el(id); if(e) e.addEventListener(ev, fn); },
+            
+            renderMath: (idOrEl, latex) => {
+                if(!window.katex) return;
+                const el = window.WH._el(idOrEl); 
+                if(!el) return;
+                try { 
+                    katex.render(latex, el, { throwOnError: false }); 
+                } catch(e) { 
+                    el.textContent = latex; 
+                }
+            },
+
+            getColor: (v) => {
+                if (!v) return 'transparent';
+                if (v === 'transparent' || v.startsWith('#') || v.startsWith('rgb') || v.startsWith('hsl')) return v;
+
+
+                let key = v.toLowerCase().trim();
+                if (!key.startsWith('--')) key = '--' + key;
+
+
+                const TOKENS = {
+                    '--bg': '--surface', '--background': '--surface', '--main-bg': '--surface',
+                    '--panel': '--surface-container', '--bg-panel': '--surface-container',
+                    '--card': '--surface-container', '--card-bg': '--surface-container', 
+                    '--modal': '--surface-container-high',
+
+                    '--text': '--on-surface-default', '--foreground': '--on-surface-default', '--fg': '--on-surface-default',
+                    '--text-primary': '--on-surface-default', '--header': '--on-surface-default',
+                    '--text-secondary': '--on-surface-de-emphasis', '--subheader': '--on-surface-de-emphasis',
+                    '--text-muted': '--on-surface-de-emphasis', '--muted': '--on-surface-de-emphasis',
+                    
+                    '--on-surface-variant': '--on-surface-de-emphasis',
+                    '--on-surface-medium': '--on-surface-de-emphasis',
+
+                    '--accent': '--primary', '--brand': '--primary', '--info': '--primary',
+                    '--highlight-bg': '--highlight', '--selection': '--highlight',
+
+                    '--border': '--stroke-default', '--divider': '--stroke-default', '--separator': '--stroke-default',
+                    '--border-active': '--stroke-emphasis',
+
+                    '--success': '--positive', '--green': '--positive', '--bg-success': '--positive-surface',
+                    '--error': '--negative', '--danger': '--negative', '--red': '--negative', '--bg-error': '--negative-surface',
+                    '--warning': '--chart-3', '--orange': '--chart-3', '--yellow': '--chart-3', 
+                    
+                    '--grey': '--stroke-emphasis', '--gray': '--stroke-emphasis',
+                    '--neutral': '--surface-container-high',
+
+                    '--chart-blue': '--blue', '--chart-green': '--green', '--chart-yellow': '--yellow',
+                    '--chart-red': '--red', '--chart-purple': '--purple', '--chart-orange': '--orange',
+                };
+
+                const target = TOKENS[key] || key;
+
+                let c = getComputedStyle(document.documentElement).getPropertyValue(target).trim();
+
+                if (!c) {
+                    if (key.includes('text') || key.includes('fg') || key.includes('on-surface')) c = getComputedStyle(document.documentElement).getPropertyValue('--on-surface-default').trim();
+                    else if (key.includes('bg') || key.includes('surface')) c = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim();
+                    else if (key.includes('border')) c = getComputedStyle(document.documentElement).getPropertyValue('--stroke-default').trim();
+                    else c = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+                }
+
+                return c;
+            },
+            
+            transparent: (c, op) => {
+                if (window.d3 && d3.color) {
+                    const col = d3.color(window.WH.getColor(c));
+                    if(col) { col.opacity = op; return col.toString(); }
+                }
+                return window.WH.getColor(c);
+            },
+
+            createTextSprite: (text, fontsize = 24) => {
+                if (!window.THREE) return null;
+                
+                const padding = 12;
+                const border = 4;
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                ctx.font = `bold ${fontsize}px sans-serif`;
+                const metrics = ctx.measureText(text);
+                const textWidth = metrics.width;
+                
+                const w = textWidth + (padding * 2);
+                const h = fontsize + (padding * 2);
+                canvas.width = w;
+                canvas.height = h;
+                
+                ctx.fillStyle = "rgba(20, 20, 20, 0.75)"; // High contrast pill
+                ctx.beginPath();
+                if (ctx.roundRect) {
+                    ctx.roundRect(0, 0, w, h, h/2);
+                } else {
+                    // Fallback for older browsers
+                    ctx.rect(0, 0, w, h);
+                }
+                ctx.fill();
+                
+                ctx.font = `bold ${fontsize}px sans-serif`;
+                ctx.fillStyle = "#ffffff";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(text, w/2, h/2 + 2); // +2 adjustment for visual center
+
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.minFilter = THREE.LinearFilter;
+                
+                const material = new THREE.SpriteMaterial({ 
+                    map: texture, 
+                    transparent: true,
+                    depthTest: false
+                });
+                
+                const sprite = new THREE.Sprite(material);
+                
+                const scaleFactor = 0.02 * (fontsize / 24); 
+                sprite.scale.set(w * scaleFactor, h * scaleFactor, 1);
+                
+                return sprite;
+            },
+            
+            _createSafeCtx: (realCtx, widthFn, heightFn) => {
+                let _scalingCanvas = null;
+                let _scalingCtx = null;
+
+                return new Proxy(realCtx, {
+                    get(target, prop) {
+                        if (prop === 'putImageData') {
+                            return (imgData, dx, dy) => {
+                                const c = realCtx.canvas;
+                                const logicalWidth = widthFn();
+                                const isLogicalSize = (Math.abs(imgData.width - logicalWidth) < 1);
+                                const dpr = window.devicePixelRatio || 1;
+                                
+                                if (dpr > 1 && isLogicalSize) {
+                                    if (!_scalingCanvas) {
+                                        _scalingCanvas = document.createElement('canvas');
+                                        _scalingCtx = _scalingCanvas.getContext('2d');
+                                    }
+                                    if (_scalingCanvas.width !== imgData.width || _scalingCanvas.height !== imgData.height) {
+                                        _scalingCanvas.width = imgData.width;
+                                        _scalingCanvas.height = imgData.height;
+                                    }
+                                    _scalingCtx.putImageData(imgData, 0, 0);
+                                    target.drawImage(_scalingCanvas, dx, dy);
+                                } else {
+                                    target.putImageData(imgData, dx, dy);
+                                }
+                            };
+                        }
+
+                        const value = target[prop];
+                        if (typeof value === 'function') {
+                            return (...args) => {
+                                // 1. NaN Protection
+                                for (let arg of args) {
+                                    if (typeof arg === 'number' && !Number.isFinite(arg)) return;
+                                }
+                                if (prop === 'arc' && args.length > 2 && args[2] < 0) args[2] = Math.abs(args[2]);
+                                
+                                return value.apply(target, args);
+                            };
+                        }
+                        return value; 
+                    },
+                    set(target, prop, value) {
+                        target[prop] = value;
+                        return true;
+                    }
+                });
+            },
+            
+            initCanvas: (ctr, onSetup, options = {}) => {
+                let el = window.WH._getViz(ctr); if(!el) return;
+                const existing = el.querySelector('canvas'); if (existing) existing.remove();
+                const c = document.createElement('canvas');
+                c.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none;outline:none';
+                try { el.appendChild(c); } catch(e) { return; }
+                
+                const realCtx = c.getContext('2d', { alpha: options.alpha !== false });
+                let autoClear = true;
+
+                if (!realCtx.roundRect) {
+                    realCtx.roundRect = function(x, y, w, h, r) {
+                        if (w < 2 * r) r = w / 2;
+                        if (h < 2 * r) r = h / 2;
+                        this.beginPath();
+                        this.moveTo(x + r, y);
+                        this.arcTo(x + w, y, x + w, y + h, r);
+                        this.arcTo(x + w, y + h, x, y + h, r);
+                        this.arcTo(x, y + h, x, y, r);
+                        this.arcTo(x, y, x + w, y, r);
+                        this.closePath();
+                        return this;
+                    };
+                }
+
+                realCtx.setAutoClear = (enabled) => { autoClear = !!enabled; };
+
+                realCtx.drawTag = (text, x, y, a4, a5) => {
+                    realCtx.save();
+                    const themeFont = getComputedStyle(document.body).getPropertyValue('--ff-sans') || 'sans-serif';
+                    realCtx.font = `bold 12px ${themeFont}`;
+                    realCtx.textBaseline = 'middle';
+                    
+                    const m = realCtx.measureText(text);
+                    const w = m.width + 16;
+                    const h = 24;
+                    
+                    const dpr = window.devicePixelRatio || 1;
+                    const maxW = realCtx.canvas.width / dpr;
+                    let dx = x;
+                    if (dx - w/2 < 4) dx = w/2 + 4;
+                    if (dx + w/2 > maxW - 4) dx = maxW - w/2 - 4;
+
+                    let bg = window.WH.getColor('--surface');
+                    let fg = window.WH.getColor('--on-surface-default');
+                    
+                    const isColor = (v) => typeof v === 'string';
+
+                    if (isColor(a4) && isColor(a5)) { 
+                        bg = window.WH.getColor(a4);
+                        fg = window.WH.getColor(a5);
+                    } else if (isColor(a4)) {
+                        fg = window.WH.getColor(a4);
+                    }
+                    
+                    realCtx.globalAlpha = 0.9;
+                    realCtx.fillStyle = bg;
+                    realCtx.beginPath();
+                    realCtx.roundRect(dx - w/2, y - h/2, w, h, 12);
+                    realCtx.fill();
+                    
+                    realCtx.globalAlpha = 1.0;
+                    realCtx.fillStyle = fg;
+                    realCtx.textAlign = 'center';
+                    realCtx.fillText(text, dx, y);
+                    
+                    realCtx.restore();
+                };
+                
+                const safeCtx = window.WH._createSafeCtx(realCtx, () => c.width / (window.devicePixelRatio||1), () => c.height / (window.devicePixelRatio||1));
+
+                const existingCanvasListeners = new Set();
+                const originalCanvasAddEventListener = c.addEventListener;
+                c.addEventListener = (type, fn, options) => {
+                    const key = type + fn.toString();
+                    if (existingCanvasListeners.has(key)) return;
+                    existingCanvasListeners.add(key);
+                    originalCanvasAddEventListener.call(c, type, fn, options);
+                };
+
+                const pointer = { x: -1000, y: -1000, isDown: false, justPressed: false, justReleased: false };
+                Object.defineProperties(pointer, {
+                    'down': { get: () => pointer.isDown },
+                    'up':   { get: () => pointer.justReleased }, // Map 'up' to a one-shot event, not a continuous state
+                    'primary': { get: () => pointer.isDown },
+                    'nx': { get: () => window.WH.clamp(pointer.x / (logicW || 1), 0, 1) },
+                    'ny': { get: () => window.WH.clamp(pointer.y / (logicH || 1), 0, 1) }
+                });
+
+                let logicW=0, logicH=0, offX=0, offY=0;
+
+                const updatePointer = (e, isDownVal) => {
+                     const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+                     const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
+                     if (typeof clientX !== 'number') return;
+                     const r = c.getBoundingClientRect();
+                     pointer.x = (clientX - r.left) - offX;
+                     pointer.y = (clientY - r.top) - offY;
+                     if (isDownVal !== undefined) pointer.isDown = isDownVal;
+                };
+                c.addEventListener('mousedown', (e) => { pointer.justPressed = true; updatePointer(e, true); });
+                c.addEventListener('mousemove', (e) => updatePointer(e));
+                c.addEventListener('mouseup',   (e) => { pointer.isDown = false; pointer.justReleased = true; });
+                c.addEventListener('mouseleave',(e) => { pointer.isDown = false; pointer.x = -1000; pointer.y = -1000; });
+                c.addEventListener('touchstart', (e) => { pointer.justPressed = true; updatePointer(e, true); e.preventDefault(); }, {passive:false});
+                c.addEventListener('touchmove',  (e) => { updatePointer(e); e.preventDefault(); }, {passive:false});
+                c.addEventListener('touchend',   (e) => { pointer.isDown = false; pointer.justReleased = true; e.preventDefault(); }, {passive:false});
+
+                let active=true, loopFn=null, isSetup=false;
+                const updateSize = () => {
+                     const r = el.getBoundingClientRect();
+                     
+                     // FIX: Defer setup until container is visible. 
+                     if (r.width === 0 || r.height === 0) return;
+                     
+                     const dpr = window.devicePixelRatio || 1;
+                     const W = r.width;
+                     const H = r.height;
+                     c.width = W * dpr; c.height = H * dpr;
+                     
+                     if (options.aspectRatio) {
+                         if (W / H > options.aspectRatio) { logicH = H; logicW = H * options.aspectRatio; offX = (W - logicW) / 2; offY = 0; }
+                         else { logicW = W; logicH = W / options.aspectRatio; offX = 0; offY = (H - logicH) / 2; }
+                     } else { logicW = W; logicH = H; offX = 0; offY = 0; }
+
+                     if (!isSetup) {
+                         isSetup = true;
+                         try { 
+                             loopFn = onSetup(safeCtx, logicW, logicH, pointer); 
+                         } catch(e) { window.WH.showError(e.message); active=false; }
+                     }
+                };
+                new ResizeObserver(updateSize).observe(el); 
+
+                let lastTime = null;
+                const MAX_FRAME_TIME = 100; 
+                let consecutivelySlowFrames = 0;
+                
+                const loop = (t) => {
+                    if(!active) return;
+                    const start = performance.now();
+                    if (lastTime === null) lastTime = t;
+                    const dtMs = Math.min(t - lastTime, 100); 
+                    lastTime = t;
+
+                    if (isSetup && typeof loopFn === 'function') {
+                        const dpr = window.devicePixelRatio || 1;
+                        realCtx.resetTransform();
+                        
+                        if (autoClear) realCtx.clearRect(0, 0, c.width, c.height);
+                        
+                        realCtx.setTransform(dpr, 0, 0, dpr, offX * dpr, offY * dpr);
+                        
+                        realCtx.globalAlpha = 1.0;
+                        realCtx.lineWidth = 1;
+                        realCtx.shadowBlur = 0;
+                        realCtx.lineJoin = 'miter';
+                        realCtx.lineCap = 'butt';
+                        const themeFont = getComputedStyle(document.body).getPropertyValue('--ff-sans') || 'sans-serif';
+                        realCtx.font = `500 14px ${themeFont}`; 
+                        realCtx.textBaseline = 'middle';
+                        realCtx.textAlign = 'left';
+                        realCtx.fillStyle = window.WH.getColor('--on-surface-default');
+                        realCtx.strokeStyle = window.WH.getColor('--stroke-default');
+
+                        if (options.aspectRatio) { realCtx.beginPath(); realCtx.rect(0, 0, logicW, logicH); realCtx.clip(); }
+
+                        try {
+                             const tSec = t / 1000;
+                             const dtSec = dtMs / 1000;
+                             if (loopFn.length === 1) {
+                                 loopFn({ 
+                                     ctx: safeCtx, 
+                                     width: logicW, 
+                                     height: logicH, 
+                                     time: tSec, 
+                                     dt: dtSec, 
+                                     pointer,
+                                     state: window.WH._activeState
+                                 });
+                             }
+                             else if (loopFn.length === 2) loopFn(tSec, dtSec);
+                             else loopFn(safeCtx, logicW, logicH, tSec, dtSec, pointer);
+                        } catch(e) { window.WH.showError(e.message); active=false; }
+                        pointer.justPressed = false;
+                        pointer.justReleased = false;
+                    }
+
+                    const end = performance.now();
+                    if (end - start > MAX_FRAME_TIME) {
+                        consecutivelySlowFrames++;
+                        if (consecutivelySlowFrames > 5) {
+                            active = false;
+                            window.WH.showError("Widget stopped: Low performance / Infinite loop detected.");
+                            return; 
+                        }
+                    } else {
+                        consecutivelySlowFrames = 0;
+                    }
+
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+                return { canvas: c, ctx: safeCtx, stop: () => active=false };
+            },
+
+            // B. D3 (Flexible: SVG or DOM)
+            initD3: (id, onSetup) => {
+                 const el = window.WH._getViz(id); if(!el) return;
+                 
+                 const proxyUpdate = (...args) => {
+                     if (userUpdate) {
+                         try { userUpdate(...args); } catch(e) { window.WH.showError(e.message); }
+                     } else {
+                         pendingArgs = args;
+                     }
+                 };
+                 
+                 const selection = d3.select(el);
+                 
+                 if (!('clientWidth' in selection)) {
+                     Object.defineProperty(selection, 'clientWidth', { get: () => el.clientWidth });
+                     Object.defineProperty(selection, 'clientHeight', { get: () => el.clientHeight });
+                     Object.defineProperty(selection, 'getBoundingClientRect', { value: () => el.getBoundingClientRect() });
+                 }
+                 
+                 let isSetup = false, userUpdate = null, pendingArgs = null;
+                 let curW = 0, curH = 0;
+
+                  const render = () => {
+                     const r = el.getBoundingClientRect();
+                     
+                     if (r.width === 0 && r.height === 0) return; 
+                     
+                     const safeW = r.width || 300;
+                     const safeH = r.height || 200;
+                     
+                     curW = safeW; curH = safeH;
+                         
+                     selection.select('svg')
+                        .attr('width', '100%').attr('height', '100%')
+                        .attr('viewBox', [0, 0, safeW, safeH]);
+                            
+                     if (!isSetup) {
+                         isSetup = true;
+                         try { 
+                             const result = onSetup(selection, safeW, safeH); 
+                                 
+                                 if (typeof result === 'function') {
+                                     userUpdate = result;
+                                     try { userUpdate(); } catch(e) { window.WH.showError(e.message); }
+                                 } else {
+                                     userUpdate = () => {
+                                         // Clear and re-run setup with latest dimensions
+                                         el.innerHTML = '';
+                                         onSetup(selection, curW, curH);
+                                     };
+                                 }
+
+                                 if (pendingArgs && userUpdate) {
+                                     userUpdate(...pendingArgs);
+                                     pendingArgs = null;
+                                 }
+                             } 
+                             catch(e) { window.WH.showError(e.message); }
+                         }
+                 };
+                 new ResizeObserver(() => requestAnimationFrame(render)).observe(el);
+                 return proxyUpdate;
+            },
+            
+            // C. PLOT (Stable Sizing)
+            initPlot: (id, getOptions) => {
+                if (!window.Plot) return;
+                const el = window.WH._getViz(id); if (!el) return;
+                el.style.position = 'relative'; el.style.overflow = 'hidden'; // Force clipping
+                const c = window.WH.getColor;
+                
+                const render = () => {
+                    if (!el.isConnected) return;
+                    const rect = el.getBoundingClientRect();
+                    // Plot requires valid dimensions
+                    if (rect.width === 0 || rect.height === 0) return;
+                    const w = Math.floor(rect.width); 
+                    const h = Math.floor(rect.height);
+
+                    let result; 
+                    try { 
+                        result = getOptions(w, h); 
+                        if (typeof result === 'function') result = result();
+                    } 
+                    catch (e) { 
+                        return; 
+                    }
+
+                    const theme = {
+                        style: { background: 'transparent', color: c('--on-surface-default'), fontFamily: c('--ff-sans'), fontSize: '13px', overflow: 'visible' },
+                        marginLeft: 50, marginBottom: 40,
+                        marginRight: 20, // <--- ADD THIS (Safety margin)
+                        color: { range: [c('--chart-1'), c('--chart-2'), c('--chart-3'), c('--chart-4'), c('--chart-5')], unknown: c('--on-surface-de-emphasis') }
+                    };
+
+                    let chartNode;
+                    try { 
+                       // Handle DOM Node (Manual Plot) vs Config Object (Standard)
+                       if (result instanceof Element || (result && result.nodeType)) {
+                           chartNode = result;
+                       } else if (typeof result === 'object' && result !== null) {
+                           chartNode = Plot.plot({ ...theme, ...result, width: w, height: h });
+                       }
+
+                       if (chartNode) {
+                           chartNode.style.display = 'block';
+                           chartNode.style.maxWidth = '100%';
+                           chartNode.style.maxHeight = '100%';
+                           el.replaceChildren(chartNode); 
+                       }
+                    } catch (e) {
+                        return;
+                    }
+                };
+                new ResizeObserver(render).observe(el);
+                requestAnimationFrame(render);
+                return render;
+            },
+            
+            initThree: (ctr, onSetup) => {
+                if (!window.THREE) return;
+                window.WH.addBadge('3d_rotation', 'Rotate & Zoom', true);
+                const el = window.WH._getViz(ctr); if(!el) return;
+                const existing = el.querySelector('canvas'); if (existing) existing.remove();
+                const c = document.createElement('canvas');
+                c.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none;outline:none';
+                el.appendChild(c);
+                
+                // 1. SMART POINTER (Raycaster Safe)
+                const pointerData = { x: -1000, y: -1000, ndc: {x:0, y:0}, isDown: false };
+                const smartPointer = {
+                    get x() { return pointerData.ndc.x; }, // NDC for Three.js
+                    get y() { return pointerData.ndc.y; },
+                    get isDown() { return pointerData.isDown; },
+                    get rawX() { return pointerData.x; },      // Pixels if needed
+                    get rawY() { return pointerData.y; }
+                };
+
+                const updatePointer = (e) => {
+                      const r = c.getBoundingClientRect();
+                      if (r.width === 0 || r.height === 0) return; // Defense against div/0
+                      const cx = (e.touches ? e.touches[0].clientX : e.clientX);
+                      if(cx!==undefined) {
+                          pointerData.x = cx - r.left; pointerData.y = (e.touches?e.touches[0].clientY:e.clientY) - r.top;
+                          // Auto-calculate NDC (-1 to +1)
+                          pointerData.ndc.x = (pointerData.x / r.width) * 2 - 1;
+                          pointerData.ndc.y = -(pointerData.y / r.height) * 2 + 1;
+                      }
+                };
+                c.addEventListener('mousemove', updatePointer);
+                c.addEventListener('mousedown', () => pointerData.isDown = true);
+                c.addEventListener('mouseup', () => pointerData.isDown = false);
+                c.addEventListener('touchmove', (e)=>{updatePointer(e);e.preventDefault();}, {passive:false});
+
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000); camera.position.set(0,0,40);
+                const renderer = new THREE.WebGLRenderer({ canvas: c, alpha: true, antialias: true });
+                renderer.setPixelRatio(window.devicePixelRatio);
+                const controls = (THREE.OrbitControls) ? new THREE.OrbitControls(camera, c) : { update:()=>{}, target:new THREE.Vector3() };
+
+                let onTick = null;
+                let onStop = null;
+                let isSetup = false, active = true;
+
+                const updateSize = () => {
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) {
+                        camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+                        renderer.setSize(r.width, r.height, false);
+                        if (!isSetup) {
+                            isSetup = true;
+                            try { 
+                                const args = [scene, camera, renderer, controls, smartPointer];
+                                if (onSetup.length >= 6) args.unshift(0);
+                                
+                                const result = onSetup(...args);
+                                
+                                if (typeof result === 'function') {
+                                    onTick = result;
+                                } else if (result && typeof result.loop === 'function') {
+                                    onTick = result.loop;
+                                    if (typeof result.stop === 'function') onStop = result.stop;
+                                }
+                            } 
+                            catch(e) { window.WH.showError(e.message); active=false; }
+                        }
+                    }
+                };
+                new ResizeObserver(updateSize).observe(el);
+
+                let lastTime = null;
+                const loop = (t) => {
+                    if(!active) return;
+                    if (lastTime === null) lastTime = t;
+                    const dt = Math.min(t - lastTime, 50) / 1000;
+                    lastTime = t;
+                    if(isSetup) {
+                        controls.update();
+                        if(typeof onTick === 'function') {
+                            // FIX: Inject 'state' here too
+                            try { 
+                                onTick({ 
+                                    time: t/1000, 
+                                    dt, 
+                                    pointer: smartPointer,
+                                    state: window.WH._activeState 
+                                }); 
+                            } 
+                            catch(e) { 
+                                try { onTick(t/1000, dt, smartPointer); }
+                                catch(e2) { window.WH.showError(e.message); active=false; }
+                            }
+                        }
+                        renderer.render(scene, camera);
+                    }
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+                
+                return { 
+                    scene, camera, renderer, controls, 
+                    stop: () => { 
+                        active = false;
+                        if (onStop) onStop(); 
+                        renderer.dispose();
+                    } 
+                };
+            },
+            
+            initPhysics: (ctr, optionsOrUpdate, legacyOnReady) => {
+                 if(!window.Matter) return;
+                 let onUpdate, onRender, onReady;
+                 
+                 if (typeof optionsOrUpdate === 'function') {
+                     onUpdate = optionsOrUpdate; onReady = legacyOnReady;
+                 } else if (optionsOrUpdate) {
+                     onUpdate = optionsOrUpdate.onUpdate;
+                     onRender = optionsOrUpdate.onRender;
+                     onReady = optionsOrUpdate.onReady;
+                 }
+
+                 if (onUpdate && onUpdate.length >= 3) {
+                     /* console.warn("WH: Auto-fixing physics loop signature"); */
+                     onRender = onUpdate;
+                     onUpdate = null;
+                 }
+
+                 let el = window.WH._getViz(ctr); if(!el) return;
+                 const existing = el.querySelector('canvas'); if (existing) existing.remove();
+                 
+                 const engine = Matter.Engine.create();
+                 const render = Matter.Render.create({
+                    element: el, engine: engine,
+                    options: { width: 100, height: 100, pixelRatio: window.devicePixelRatio, background: 'transparent', wireframes: false }
+                 });
+                 render.canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;touch-action:none';
+                 
+                 const mouse = Matter.Mouse.create(render.canvas);
+                 const mouseConstraint = Matter.MouseConstraint.create(engine, { mouse: mouse, constraint: { stiffness: 0.2, render: { visible: false } } });
+                 Matter.World.add(engine.world, mouseConstraint);
+                 render.mouse = mouse;
+
+                 let isInitialized = false;
+                 const update = () => {
+                    const r = el.getBoundingClientRect();
+                    // Physics Safety: Defer init until visible
+                    if (r.width > 0 && r.height > 0) {
+                         render.options.width = r.width; render.options.height = r.height;
+                         render.canvas.width = r.width * window.devicePixelRatio;
+                         render.canvas.height = r.height * window.devicePixelRatio;
+                         if(!isInitialized && onReady) {
+                             isInitialized = true;
+                             try { onReady(r.width, r.height, engine, render); } catch(e) { window.WH.showError(e.message); }
+                         }
+                    }
+                 };
+                 new ResizeObserver(update).observe(el); requestAnimationFrame(update);
+                 
+                 if (onUpdate) {
+                    Matter.Events.on(engine, 'beforeUpdate', (event) => {
+                        const dt = Math.min(event.source.timing.lastDelta, 100);
+                        try { onUpdate(event.source, dt); } 
+                        catch(e) { window.WH.showError(e.message); }
+                    });
+                }
+                 if (onRender) {
+                    const safePhysicsCtx = window.WH._createSafeCtx(
+                        render.context, 
+                        () => render.options.width, 
+                        () => render.options.height
+                    );
+                    Matter.Events.on(render, 'afterRender', () => {
+                        try {
+                            onRender(
+                                safePhysicsCtx, 
+                                render.options.width, 
+                                render.options.height, 
+                                engine
+                            ); 
+                        } catch(e) { window.WH.showError(e.message); }
+                    });
+                 }
+                 Matter.Render.run(render);
+                 const runner = Matter.Runner.create();
+                 Matter.Runner.run(runner, engine);
+                 
+                 return { engine, world: engine.world, runner, render, mouseConstraint, stop: () => { Matter.Render.stop(render); Matter.Runner.stop(runner); }};
+            }
+        };
+    
+    </script>
+
+    <script>
+
+// 1. Setup UI & State
+const ui = WH.createApp({
+  title: "Pharmacodynamic Tuner",
+  help: "Simulate drug profiles by adjusting receptor affinities and signaling bias to observe clinical outcomes.",
+});
+
+// Split view: Radar Chart (Input Profile) on Top, Outcomes (Bar Chart) on Bottom
+const { vizTop, vizBottom } = ui.splitViz('50%');
+
+// 2. Define Reactive State
+const state = WH.createState({
+  muAffinity: 80, // 0-100
+  deltaInteraction: 'None', // None, Agonist, Antagonist
+  adrenergicAffinity: 10, // 0-100
+  biasedSignaling: false, // boolean
+  // Computed outcomes for display
+  outcomes: [] 
+});
+
+// 3. Physics / Calculation Logic
+function calculateOutcomes() {
+  const { muAffinity, deltaInteraction, adrenergicAffinity, biasedSignaling } = state;
+  
+  // 1. Pain Relief: Primarily driven by Mu
+  // Biased signaling maintains analgesia (sometimes enhances due to less tolerance, but we'll keep it 1:1 for simplicity)
+  let pain = muAffinity;
+
+  // 2. Antidepressant Effect
+  // Hypothesis: Delta Antagonism is a potent antidepressant. Adrenergic adds energy/mood.
+  let mood = 0;
+  if (deltaInteraction === 'Antagonist') {
+    mood += 60; // Strong antidepressant mechanism
+  } else if (deltaInteraction === 'Agonist') {
+    mood += 10; // Mild
+  }
+  mood += adrenergicAffinity * 0.4; // Adrenergic contribution
+  // Mu adds a bit of euphoria initially, but let's focus on the sustainable antidepressant effect
+  mood += muAffinity * 0.1; 
+
+  // 3. Social Energy
+  // Driven by Adrenergic/Serotonin
+  let social = adrenergicAffinity;
+  // Too much Mu can cause sedation, reducing social energy
+  if (muAffinity > 70) {
+    social -= (muAffinity - 70) * 0.5;
+  }
+
+  // 4. Respiratory Risk
+  // High Mu = High Risk.
+  // Biased Signaling (G-Protein preference) significantly reduces beta-arrestin recruitment -> Low Risk.
+  let risk = muAffinity;
+  if (biasedSignaling) {
+    risk = risk * 0.25; // Significant safety factor
+  }
+  // Synergistic risk if Adrenergic is very low (sedation)? No, let's keep it simple.
+  
+  // Clamp values 0-100
+  const clamp = (v) => Math.max(0, Math.min(100, v));
+  
+  return [
+    { label: 'Pain Relief', value: clamp(pain), color: '--chart-1' },
+    { label: 'Antidepressant', value: clamp(mood), color: '--chart-2' },
+    { label: 'Social Energy', value: clamp(social), color: '--chart-3' },
+    { label: 'Respiratory Risk', value: clamp(risk), color: risk > 50 ? '--negative' : '--positive' }
+  ];
+}
+
+// Initialize state outcomes
+state.outcomes = calculateOutcomes();
+
+// Subscription to update outcomes when inputs change
+state._subscribe(() => {
+  state.outcomes = calculateOutcomes();
+  updateBarChart(); // Trigger D3 update
+});
+
+// 4. Scenario Helpers
+const setScenario = (name) => {
+  switch (name) {
+    case 'Morphine':
+      state.muAffinity = 90;
+      state.deltaInteraction = 'None';
+      state.adrenergicAffinity = 5;
+      state.biasedSignaling = false;
+      ui.setStatus('Morphine: High Analgesia, High Risk.');
+      break;
+    case 'Kratom':
+      state.muAffinity = 40;
+      state.deltaInteraction = 'Agonist'; // Simplified
+      state.adrenergicAffinity = 85;
+      state.biasedSignaling = true; // Partial agonist / biased
+      ui.setStatus('Raw Kratom: Stimulating, Mild Analgesia, Safer.');
+      break;
+    case 'Pseudoindoxyl':
+      state.muAffinity = 95;
+      state.deltaInteraction = 'Antagonist';
+      state.adrenergicAffinity = 20;
+      state.biasedSignaling = true;
+      ui.setStatus('Pseudoindoxyl: Potent Analgesia, Antidepressant, Safe.');
+      break;
+  }
+};
+
+// 5. Render Loops
+
+// A. Radar Chart (Canvas) - Visualizes the Molecule Profile
+WH.initCanvas(vizTop, (ctx, _w, _h) => {
+  // Setup static assets if needed
+  
+  return ({ ctx, width, height, state, time }) => {
+    // Clear
+    ctx.fillStyle = WH.getColor('--surface');
+    ctx.fillRect(0, 0, width, height);
+    
+    const cx = width / 2;
+    const cy = height / 2;
+    const maxRadius = Math.min(width, height) * 0.35;
+    
+    // Axes Config
+    // 1. Mu (Top)
+    // 2. Adrenergic (Bottom Right)
+    // 3. Delta (Bottom Left)
+    const axes = [
+      { label: 'Mu-Opioid', angle: -Math.PI / 2, value: state.muAffinity, color: '--chart-1' },
+      { label: 'Adrenergic', angle: Math.PI / 6, value: state.adrenergicAffinity, color: '--chart-3' },
+      { label: 'Delta-Opioid', angle: 5 * Math.PI / 6, value: 0, color: '--chart-2' } // Value calc below
+    ];
+
+    // Handle Delta visualization logic
+    // Agonist = Positive extension, Antagonist = Distinct marker?
+    // Let's map Magnitude to length, and use style to differentiate.
+    let deltaMag = 0;
+    if (state.deltaInteraction === 'Agonist') deltaMag = 50;
+    if (state.deltaInteraction === 'Antagonist') deltaMag = 80;
+    axes[2].value = deltaMag;
+
+    // Draw Radar Background
+    ctx.strokeStyle = WH.getColor('--on-surface-default');
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.2;
+    
+    // Web rings
+    for (let i = 1; i <= 4; i++) {
+      ctx.beginPath();
+      const r = maxRadius * (i / 4);
+      for (let j = 0; j < 3; j++) {
+        const a = axes[j].angle;
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r;
+        if (j === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+    
+    // Axis Lines
+    axes.forEach(axis => {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(axis.angle) * maxRadius, cy + Math.sin(axis.angle) * maxRadius);
+      ctx.stroke();
+      
+      // Label
+      const lx = cx + Math.cos(axis.angle) * (maxRadius + 30);
+      const ly = cy + Math.sin(axis.angle) * (maxRadius + 20);
+      ctx.drawTag(axis.label, lx, ly, axis.color);
+    });
+
+    ctx.globalAlpha = 1.0;
+
+    // Draw Data Shape
+    ctx.beginPath();
+    const points = axes.map(axis => {
+      const r = (axis.value / 100) * maxRadius;
+      return {
+        x: cx + Math.cos(axis.angle) * r,
+        y: cy + Math.sin(axis.angle) * r
+      };
+    });
+
+    ctx.moveTo(points[0].x, points[0].y);
+    ctx.lineTo(points[1].x, points[1].y);
+    ctx.lineTo(points[2].x, points[2].y);
+    ctx.closePath();
+
+    // Fill style
+    ctx.fillStyle = WH.transparent('--primary', 0.3);
+    ctx.strokeStyle = WH.getColor('--primary');
+    ctx.lineWidth = 3;
+    
+    // Pulse effect if biased signaling is on (The "Safe" Pulse)
+    if (state.biasedSignaling) {
+      ctx.shadowBlur = 15 + Math.sin(time * 5) * 5;
+      ctx.shadowColor = WH.getColor('--positive');
+      ctx.strokeStyle = WH.getColor('--positive');
+      ctx.fillStyle = WH.transparent('--positive', 0.3);
+    } else {
+       ctx.shadowBlur = 0;
+    }
+    
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0; // Reset
+
+    // Draw Interaction Points
+    points.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = WH.getColor(axes[i].color);
+      ctx.fill();
+    });
+    
+    // Delta Label Specifics
+    if (state.deltaInteraction !== 'None') {
+      const p = points[2];
+      ctx.fillStyle = WH.getColor('--surface');
+      ctx.drawTag(state.deltaInteraction, p.x, p.y + 20, '--chart-2');
+    }
+    
+    // Central Bias Indicator
+    if (state.biasedSignaling) {
+      ctx.drawTag("G-Protein Biased", cx, cy + 15, '--positive');
+    } else {
+      ctx.drawTag("Standard Signaling", cx, cy + 15, '--on-surface-default');
+    }
+  };
+});
+
+// B. Bar Chart (D3/Plot) - Outcomes
+const updateBarChart = WH.initPlot(vizBottom, (width, height) => {
+  const data = state.outcomes;
+  
+  return {
+    marginLeft: 100,
+    marginBottom: 40,
+    marginTop: 20,
+    x: { domain: [0, 100], grid: true, label: "Effect Intensity (%)" },
+    y: { domain: data.map(d => d.label), label: null },
+    marks: [
+      Plot.barX(data, {
+        x: "value",
+        y: "label",
+        fill: d => WH.getColor(d.color),
+        title: d => `${d.label}: ${d.value.toFixed(0)}%`
+      }),
+      Plot.text(data, {
+        x: "value",
+        y: "label",
+        text: d => d.value.toFixed(0),
+        dx: 10,
+        fill: WH.getColor('--on-surface-default')
+      }),
+      Plot.ruleX([0])
+    ]
+  };
+});
+
+// 6. Controls
+ui.addSlider('Mu-Opioid Affinity', { key: 'muAffinity', min: 0, max: 100, step: 1 });
+ui.addSlider('Adrenergic Affinity', { key: 'adrenergicAffinity', min: 0, max: 100, step: 1 });
+
+ui.addSelect('Delta Interaction', ['None', 'Agonist', 'Antagonist'], { key: 'deltaInteraction' });
+ui.addToggle('Biased Signaling (Safety)', { key: 'biasedSignaling' });
+
+ui.addButtonGroup([
+  { label: 'Morphine', onClick: () => setScenario('Morphine'), variant: 'secondary' },
+  { label: 'Raw Kratom', onClick: () => setScenario('Kratom'), variant: 'secondary' },
+  { label: 'Pseudoindoxyl', onClick: () => setScenario('Pseudoindoxyl'), variant: 'primary' }
+]);
+
+ui.setStatus('Adjust sliders to simulate drug profile.');
+
+    </script>
+
+</body>
+</html>
