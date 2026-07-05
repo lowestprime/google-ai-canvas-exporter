@@ -1,5 +1,5 @@
 ---
-title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.2"
+title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.3"
 date: 2026-04-05
 source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 ---
@@ -9,6 +9,28 @@ source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 One-click export of Google AI Search mode interactive canvas widgets (simulations, visualizations, 3D scenes) as fully self-contained offline HTML files. Automatically detects Widget Shell V2 content inside sandboxed scf.usercontent.goog iframes, strips Google's CSP/sandbox restrictions, extracts WidgetHelpers + simulation logic + CDN dependencies (D3, Plot, Three.js, Matter.js, KaTeX, anime.js), eliminates the "Ghost UI" duplication bug, injects fallback fonts, and reconstructs a clean standalone document with dark/light mode toggle and full-viewport sizing.
 
 ---
+
+## Version 5.0.3
+2026-07-05
+
+Mixed-content conversation export repair. This release treats a Google AI Mode thread as ordered conversation segments instead of assuming every later prompt, response, and canvas remains inside `.CKgc1d`.
+
+### Root causes fixed
+
+| Failure | Root cause and correction |
+|---|---|
+| Formal Classification exported only the first exchange | The saved page has one `.CKgc1d` but two response bodies. The follow-up prompt and response live under `[data-xid="pJN44d"] > .AsFDjf.Vaqf8d > .Eltaeb`. Ordered segment discovery now covers both classic and mixed-content roots without duplicating nested blocks. |
+| Follow-up prompt was missing | The mixed prompt uses `.Ax52xb` and date `.L6HOGc`, neither of which v5.0.2 recognized. Prompt pairing now supports both structures and nearest preceding prompt fallback. |
+| Embedded canvas was absent | The widget payload starts `TgQPHd||`; slicing a fixed seven-character prefix left an invalid leading pipe. Parsing now begins at the first JSON bracket and registers `Stability Physics: Splay Angle Simulator`. |
+| Canvas placement and source order were lost | The mixed `.Eltaeb` contains prose, canvas, then more prose, while source cards are sibling asides. Snapshots now preserve response/canvas DOM order and use filtered sibling source URLs only as citation fallback. |
+| Panel reported `1 turn` and clipped the export | Counts were tied to `.CKgc1d` cache size and the textarea explicitly used `md.slice(0, 3000)`. The panel now reports segments/prompts/text responses/canvases/full characters and shows complete raw Markdown beside an escaped rendered preview. |
+
+### Compatibility and validation
+
+- Runtime activation remains fail-closed on ordinary Search and empty AI Mode home, with route-scoped observer/cache teardown.
+- Canvas HTML reconstruction remains unchanged apart from version metadata/test exposure: all six WidgetHelpers signatures, CSP/sandbox stripping, Ghost UI exclusion, CDN/fonts, dark/light flags, full viewport, zero-width resize target, and staggered downloads remain covered.
+- The Formal Classification regression requires two prompts, two text responses, one exact canvas placeholder/title, the stability-mechanics answer, clean references, and an untruncated preview. Both existing five-turn fixtures, virtualization, URL gating, observer, FAB, and canvas tests remain in the suite.
+- Detailed evidence and current browser status are in `dev_logs/execplan_v5.0.3_mixed_content_export.md` and `dev_logs/manual_validation_v5.0.3.md`.
 
 ## Version 5.0.2
 2026-07-02

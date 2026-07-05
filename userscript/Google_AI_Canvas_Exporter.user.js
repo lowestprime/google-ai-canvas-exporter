@@ -4,7 +4,7 @@
 // @author            lowestprime x Claude Opus 4.6 Max Agent
 // @namespace         https://greasyfork.org/en/users/823161-lowestprime
 // @license           MIT
-// @version           5.0.2
+// @version           5.0.3
 // @match             *://www.google.com/search*
 // @match             *://*.google.com/search*
 // @grant             none
@@ -16,7 +16,7 @@
     'use strict';
 
     const TAG = '[GCE]';
-    const VERSION = '5.0.2';
+    const VERSION = '5.0.3';
     const WH_APIS = [
         'WH.createApp', 'WH.initCanvas', 'WH.initD3',
         'WH.initPlot', 'WH.initThree', 'WH.initPhysics'
@@ -33,17 +33,22 @@
     const SELECTORS = Object.freeze({
         conversationHost: '[jsname="coFSxe"], [jsname="guest_container_"]',
         turn: '.CKgc1d',
+        segmentRoot: '.CKgc1d, [data-xid="pJN44d"], .AsFDjf.Vaqf8d, .Eltaeb',
         turnRoot: '[data-xid="aim-mars-turn-root"]',
-        prompt: '.ilZyRc.R7mRQb',
+        prompt: '.ilZyRc.R7mRQb, .Ax52xb',
+        mixedPrompt: '.Ax52xb',
         legacyPrompt: '.tonYlb',
         response: '[data-xid="VpUvz"], [jsname="KFl8ub"].mZJni',
         citation: '.WBgIic',
         canvasIframe: 'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc',
+        sourceAside: '[data-xid="aim-aside-initial-corroboration-container"], .N6Axvb',
         probe: '[jsname="coFSxe"], [jsname="guest_container_"], .CKgc1d, ' +
+            '[data-xid="pJN44d"], .AsFDjf.Vaqf8d, .Eltaeb, ' +
             'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc'
     });
     const TEST_MODE = globalThis.__GCE_TEST_MODE__ === true;
     let taggedIframes = new WeakSet();
+    let canvasByIframe = new WeakMap();
     const registry = [];
     const turnCache = new Map();
     const snapshotFingerprints = new Map();
@@ -84,6 +89,18 @@
         const el = document.createElement('textarea');
         el.innerHTML = text;
         return el.value;
+    }
+
+    function parseTgPayload(raw) {
+        const marker = String(raw || '').indexOf('TgQPHd|');
+        if (marker < 0) return null;
+        const bracket = String(raw).indexOf('[', marker + 7);
+        if (bracket < 0) return null;
+        try {
+            return JSON.parse(decodeEntities(String(raw).slice(bracket)));
+        } catch (_) {
+            return null;
+        }
     }
 
     function escapeHTML(s) {
@@ -215,14 +232,161 @@
         if (!isConversationRouteCandidate()) return null;
         return document.querySelector(SELECTORS.conversationHost)
             || document.querySelector(SELECTORS.turnRoot)?.parentElement
-            || document.querySelector(SELECTORS.turn)?.parentElement
+            || document.querySelector(SELECTORS.segmentRoot)?.parentElement
             || null;
     }
 
-    function getMountedTurnElements(root = getConversationHost()) {
+    function compareDOMOrder(a, b) {
+        if (a === b) return 0;
+        const position = a.compareDocumentPosition(b);
+        if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return 0;
+    }
+
+    function buildSegmentOrderKey(segment) {
+        return segment.root || segment.promptElement || segment.responseBlocks?.[0] || segment.canvasBlocks?.[0]?.iframe;
+    }
+
+    function isExcludedConversationNode(el) {
+        return !!el?.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]');
+    }
+
+    function isSubstantiveResponseBlock(el) {
+        if (!el || isExcludedConversationNode(el)) return false;
+        const text = textCompact(el.textContent);
+        if (text.length < 20) return false;
+        if (/^(?:AI-generated, may include mistakes|AI responses may include mistakes\.?|Share public link)/i.test(text))
+            return false;
+        if (el.matches('.JslKxc, [data-xid="Gd7Hsc"]')) return false;
+        return !!el.querySelector('p, .n6owBd, .AdPoic, .ncoeY, [role="heading"], ul, ol, table, pre, blockquote, strong, b')
+            || el.matches('p, .n6owBd, .AdPoic, .ncoeY, [role="heading"]');
+    }
+
+    function findResponseBlocks(segmentRoot) {
+        if (!segmentRoot) return [];
+        const mixed = segmentRoot.matches?.('.Eltaeb')
+            ? segmentRoot
+            : segmentRoot.querySelector?.('.Eltaeb');
+        if (mixed) {
+            const contentRoot = mixed.firstElementChild || mixed;
+            const direct = [...contentRoot.children].filter(child => {
+                if (child.querySelector(SELECTORS.mixedPrompt)) return false;
+                if (child.querySelector(SELECTORS.canvasIframe) && !isSubstantiveResponseBlock(child)) return false;
+                return isSubstantiveResponseBlock(child);
+            });
+            if (direct.length) return direct;
+            if (isSubstantiveResponseBlock(mixed)) return [mixed];
+        }
+
+        const candidates = [];
+        if (segmentRoot.matches?.(SELECTORS.response)) candidates.push(segmentRoot);
+        segmentRoot.querySelectorAll?.(SELECTORS.response).forEach(el => candidates.push(el));
+        const unique = [...new Set(candidates)].filter(isSubstantiveResponseBlock);
+        return unique.filter(candidate => !unique.some(other =>
+            other !== candidate && candidate.contains(other) && isSubstantiveResponseBlock(other)
+        ));
+    }
+
+    function findCanvasBlocks(root) {
         if (!root) return [];
-        const turns = root.matches?.(SELECTORS.turn) ? [root] : [...root.querySelectorAll(SELECTORS.turn)];
-        return turns.filter(el => !el.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]'));
+        const iframes = [];
+        if (root.matches?.(SELECTORS.canvasIframe)) iframes.push(root);
+        root.querySelectorAll?.(SELECTORS.canvasIframe).forEach(iframe => iframes.push(iframe));
+        return [...new Set(iframes)].map(iframe => ({
+            iframe,
+            root: iframe.closest('.MngkG, .emqXtf, [data-inline-canvas]') || iframe
+        }));
+    }
+
+    function getPromptCandidates(root) {
+        if (!root) return [];
+        const candidates = [];
+        if (root.matches?.(SELECTORS.prompt)) candidates.push(root);
+        root.querySelectorAll?.(SELECTORS.prompt).forEach(el => candidates.push(el));
+        root.querySelectorAll?.(SELECTORS.legacyPrompt).forEach(el => {
+            if (!el.querySelector(SELECTORS.prompt)) candidates.push(el);
+        });
+        return [...new Set(candidates)].filter(el => !!extractUserText(el));
+    }
+
+    function findPromptForResponseBlock(segmentRoot, host = getConversationHost()) {
+        if (!segmentRoot) return null;
+        if (segmentRoot.matches?.(SELECTORS.prompt) && extractUserText(segmentRoot)) return segmentRoot;
+        const contained = [...segmentRoot.querySelectorAll?.(SELECTORS.prompt) || []]
+            .find(el => extractUserText(el));
+        if (contained) return contained;
+
+        const candidates = getPromptCandidates(host);
+        let nearest = null;
+        for (const candidate of candidates) {
+            if (candidate.contains(segmentRoot)) return candidate;
+            const position = candidate.compareDocumentPosition(segmentRoot);
+            if (position & Node.DOCUMENT_POSITION_FOLLOWING) nearest = candidate;
+        }
+        return nearest;
+    }
+
+    function associateCanvasesWithSegments(segments, canvasBlocks) {
+        const unassociated = [];
+        for (const canvas of canvasBlocks) {
+            let owner = segments.find(segment => segment.root?.contains(canvas.iframe));
+            if (!owner) {
+                const preceding = segments.filter(segment => {
+                    const key = buildSegmentOrderKey(segment);
+                    return key && (key.compareDocumentPosition(canvas.iframe) & Node.DOCUMENT_POSITION_FOLLOWING);
+                });
+                owner = preceding[preceding.length - 1] || null;
+            }
+            if (owner) owner.canvasBlocks.push(canvas);
+            else unassociated.push(canvas);
+        }
+        return unassociated;
+    }
+
+    function getConversationSegments(root = getConversationHost()) {
+        if (!root) return [];
+        const candidates = [];
+        if (root.matches?.(SELECTORS.segmentRoot)) candidates.push(root);
+        root.querySelectorAll?.(`${SELECTORS.segmentRoot}, ${SELECTORS.response}`).forEach(el => candidates.push(el));
+
+        const roots = [...new Set(candidates)].filter(el => {
+            if (isExcludedConversationNode(el)) return false;
+            if (el.matches('.CKgc1d, [data-xid="pJN44d"]')) return true;
+            if (el.matches('.AsFDjf.Vaqf8d')) return !el.closest('[data-xid="pJN44d"]');
+            if (el.matches('.Eltaeb')) return !el.closest('.CKgc1d, [data-xid="pJN44d"], .AsFDjf.Vaqf8d');
+            if (el.matches(SELECTORS.response))
+                return !el.closest('.CKgc1d, [data-xid="pJN44d"], .AsFDjf.Vaqf8d, .Eltaeb');
+            return false;
+        });
+
+        const segments = roots.map(segmentRoot => ({
+            root: segmentRoot,
+            promptElement: findPromptForResponseBlock(segmentRoot, root),
+            responseBlocks: findResponseBlocks(segmentRoot),
+            canvasBlocks: []
+        })).filter(segment => segment.promptElement || segment.responseBlocks.length || findCanvasBlocks(segment.root).length);
+
+        const usedPrompts = new Set(segments.map(segment => segment.promptElement).filter(Boolean));
+        for (const promptElement of getPromptCandidates(root)) {
+            const prompt = extractUserText(promptElement);
+            if (!prompt || usedPrompts.has(promptElement)) continue;
+            segments.push({ root: promptElement, promptElement, responseBlocks: [], canvasBlocks: [] });
+            usedPrompts.add(promptElement);
+        }
+
+        segments.sort((a, b) => compareDOMOrder(buildSegmentOrderKey(a), buildSegmentOrderKey(b)));
+        const allCanvasBlocks = findCanvasBlocks(root);
+        const unassociated = associateCanvasesWithSegments(segments, allCanvasBlocks);
+        for (const canvas of unassociated) {
+            segments.push({ root: canvas.root, promptElement: null, responseBlocks: [], canvasBlocks: [canvas] });
+        }
+        segments.sort((a, b) => compareDOMOrder(buildSegmentOrderKey(a), buildSegmentOrderKey(b)));
+        return segments;
+    }
+
+    function getMountedTurnElements(root = getConversationHost()) {
+        return getConversationSegments(root).map(segment => segment.root);
     }
 
     function extractThreadTitle(turns) {
@@ -247,29 +411,44 @@
         return 'AI_Mode_Thread';
     }
 
+    function cleanPromptText(value) {
+        return textCompact(value)
+            .replace(/^You said:\s*/i, '')
+            .replace(/^You sent:\s*\d+\s+images?\s+and said:\s*/i, '');
+    }
+
     function extractUserText(turnEl) {
-        const prompt = turnEl?.querySelector(SELECTORS.prompt);
+        if (!turnEl) return '';
+        const prompt = turnEl.matches?.(SELECTORS.prompt) ? turnEl : turnEl.querySelector?.(SELECTORS.prompt);
         if (prompt) {
+            if (prompt.matches(SELECTORS.mixedPrompt)) {
+                const mixedText = prompt.querySelector('.sJvql, .TPpW9')?.textContent || prompt.textContent;
+                const clean = cleanPromptText(mixedText);
+                if (clean) return clean;
+            }
             const heading = prompt.querySelector('[role="heading"]');
             if (heading) {
                 const clone = heading.cloneNode(true);
                 clone.querySelectorAll('button, [role="button"], .iMqumd, [aria-hidden="true"]')
                     .forEach(el => el.remove());
-                const clean = textCompact(clone.textContent).replace(/^You said:\s*/i, '');
+                const clean = cleanPromptText(clone.textContent);
                 if (clean) return clean;
             }
             const copy = prompt.querySelector('button[aria-label^="Copy "]')?.getAttribute('aria-label');
-            if (copy) return textCompact(copy.replace(/^Copy\s+/i, ''));
+            if (copy) return cleanPromptText(copy.replace(/^Copy\s+/i, ''));
         }
-        const legacy = turnEl?.querySelector(SELECTORS.legacyPrompt);
+        const legacy = turnEl.matches?.(SELECTORS.legacyPrompt) ? turnEl : turnEl.querySelector?.(SELECTORS.legacyPrompt);
         if (!legacy) return '';
         const clone = legacy.cloneNode(true);
-        clone.querySelectorAll('button, [role="button"], .iMqumd, time, .kwdzO').forEach(el => el.remove());
-        return textCompact(clone.textContent).replace(/^You said:\s*/i, '');
+        clone.querySelectorAll(
+            'button, [role="button"], .iMqumd, time, .kwdzO, .L6HOGc, ' +
+            '.CKgc1d, [data-xid="pJN44d"], .AsFDjf.Vaqf8d, .Eltaeb'
+        ).forEach(el => el.remove());
+        return cleanPromptText(clone.textContent);
     }
 
     function extractTurnDate(turnEl) {
-        const dateEl = turnEl?.querySelector('time, .kwdzO, [data-xid="DChuCc"]');
+        const dateEl = turnEl?.querySelector('.L6HOGc, time, .kwdzO, [data-xid="DChuCc"]');
         if (!dateEl) return '';
         const datetime = dateEl.getAttribute('datetime');
         return textCompact(datetime || dateEl.textContent || '');
@@ -351,14 +530,8 @@
         while (walker.nextNode()) {
             const raw = String(walker.currentNode.textContent || '');
             if (!raw.includes('TgQPHd|')) continue;
-            const start = raw.indexOf('TgQPHd|') + 7;
-            try {
-                parsedPayloads.push(JSON.parse(decodeEntities(raw.slice(start))));
-            } catch (_) {
-                const bracket = raw.indexOf('[', start);
-                if (bracket < 0) continue;
-                try { parsedPayloads.push(JSON.parse(decodeEntities(raw.slice(bracket)))); } catch (_) { /* ignored */ }
-            }
+            const parsed = parseTgPayload(raw);
+            if (parsed) parsedPayloads.push(parsed);
         }
         const result = new Map();
         for (const uuid of uniqueUUIDs) {
@@ -373,10 +546,21 @@
         return result;
     }
 
-    function createCitationTracker(citationMap = new Map()) {
+    function extractFallbackSourceURLs(segmentRoot) {
+        if (!segmentRoot) return [];
+        const urls = [];
+        segmentRoot.querySelectorAll(`${SELECTORS.sourceAside} a[href]`).forEach(anchor => {
+            const normalized = normUrl(anchor.href);
+            if (normalized && isSourceURL(normalized)) urls.push(normalized);
+        });
+        return urls;
+    }
+
+    function createCitationTracker(citationMap = new Map(), fallbackURLs = []) {
         const map = new Map();
         const refs = new Map();
         let n = 1;
+        let fallbackIndex = 0;
         return {
             add(url) {
                 const k = normUrl(url);
@@ -391,6 +575,19 @@
             addUUID(uuid) {
                 return (citationMap.get(uuid) || []).map(url => ({ num: this.add(url), url })).filter(x => x.num);
             },
+            addMarker(marker) {
+                const tokens = [...marker.querySelectorAll('button[data-icl-uuid]')]
+                    .flatMap(button => this.addUUID(button.getAttribute('data-icl-uuid')));
+                if (!tokens.length && fallbackIndex < fallbackURLs.length) {
+                    const url = fallbackURLs[fallbackIndex++];
+                    const num = this.add(url);
+                    if (num) tokens.push({ num, url });
+                }
+                return tokens;
+            },
+            addRemainingFallbacks() {
+                fallbackURLs.forEach(url => this.add(url));
+            },
             refs
         };
     }
@@ -403,7 +600,8 @@
         const clone = root.cloneNode(true);
         clone.querySelectorAll(
             '[data-xid="Gd7Hsc"], [data-xid="aim-aside-initial-corroboration-container"], ' +
-            '[data-tpcrb-host], .kWjn6e, [data-xid="m3fCN"], .ofHStc, .qmNpEc, ' +
+            '.N6Axvb, .JslKxc, .Z99Mic, [data-tpcrb-host], .kWjn6e, ' +
+            '[data-xid="m3fCN"], .ofHStc, .qmNpEc, ' +
             '.emqXtf, iframe, [data-inline-canvas], .Lucn7c, .ZAjsj, ' +
             '[role="dialog"], [aria-modal="true"], aside, nav, form'
         ).forEach(n => n.remove());
@@ -431,8 +629,7 @@
             const el = node;
             const tag = el.tagName.toLowerCase();
             if (el.matches(SELECTORS.citation)) {
-                const tokens = [...el.querySelectorAll('button[data-icl-uuid]')]
-                    .flatMap(button => citeTracker.addUUID(button.getAttribute('data-icl-uuid')))
+                const tokens = citeTracker.addMarker(el)
                     .map(({ num, url }) => inlineCite(num, url));
                 return [...new Set(tokens)].join('');
             }
@@ -454,9 +651,9 @@
                 return `[${escInline(label)}](${href})`;
             }
 
-            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"]')) {
+            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"], div.ncoeY, div.xM049c.BAlmad')) {
                 const lvl = /^h[1-6]$/.test(tag) ? Number(tag[1]) : 2;
-                const t = textCompact(children());
+                const t = textCompact(children()).replace(/^#{1,6}\s+/, '');
                 return t ? `\n${'#'.repeat(lvl)} ${t}\n\n` : '';
             }
             if (tag === 'p' || el.matches('div.n6owBd')) {
@@ -568,15 +765,15 @@
         return lines.join('\n');
     }
 
-    function findCanvasPlaceholder(turnEl) {
-        if (!turnEl.querySelector(
-            'iframe[src*="scf.usercontent"], iframe.lQ27pc, [data-inline-canvas], .emqXtf'
-        )) return '';
-        for (const c of registry) {
-            const hint = turnEl.querySelector('.tonYlb, [data-xid="VpUvz"]');
-            if (hint?.textContent?.includes(c.title)) return c.title;
-        }
-        return 'Interactive Canvas';
+    function canvasPlaceholder(title) {
+        return `> [Interactive Canvas: ${title}]`;
+    }
+
+    function getResponseFingerprintText(block) {
+        const parts = [...block.querySelectorAll(
+            '.n6owBd, .AdPoic, .ncoeY, .xM049c.BAlmad, p, li, pre, blockquote, th, td'
+        )].map(el => textCompact(el.textContent)).filter(Boolean);
+        return (parts.length ? parts.join('\u241e') : textCompact(block.textContent)).slice(0, 20000);
     }
 
     function stringHash(value) {
@@ -588,25 +785,51 @@
         return (hash >>> 0).toString(36);
     }
 
-    function snapshotTurn(turnEl, order) {
-        const prompt = extractUserText(turnEl);
-        const response = turnEl.querySelector(SELECTORS.response);
-        const responseText = response ? textCompact(response.textContent) : '';
-        if (!prompt || !response || !responseText) return null;
-        const timestamp = extractTurnDate(turnEl);
-        const stable = turnEl.id || turnEl.getAttribute('data-ved')
-            || turnEl.querySelector('[data-ved]')?.getAttribute('data-ved');
-        const id = stable ? `dom:${stable}` : `content:${stringHash(`${prompt}\u241f${timestamp}\u241f${responseText.slice(0, 500)}`)}`;
-        const fingerprint = stringHash(`${responseText}\u241f${turnEl.querySelectorAll('[data-icl-uuid]').length}`);
+    function snapshotConversationSegment(segment, order) {
+        const segmentRoot = segment.root;
+        const prompt = extractUserText(segment.promptElement || segmentRoot);
+        const timestamp = extractTurnDate(segment.promptElement?.parentElement || segmentRoot);
+        const responseText = segment.responseBlocks.map(getResponseFingerprintText).join('\u241f');
+        const canvasRecords = segment.canvasBlocks.map((canvas, index) => {
+            const record = getCanvasRecordForIframe(canvas.iframe);
+            return record || { title: `Interactive Canvas ${index + 1}`, type: 'Widget' };
+        });
+        if (!prompt && !responseText && !canvasRecords.length) return null;
+        const stable = segmentRoot?.id || segmentRoot?.getAttribute?.('data-ved')
+            || segmentRoot?.querySelector?.('[data-ved]')?.getAttribute('data-ved');
+        const id = stable ? `dom:${stable}` : `content:${stringHash(`${prompt}\u241f${timestamp}\u241f${responseText}\u241f${canvasRecords.map(c => c.title).join('|')}`)}`;
+        const fingerprint = stringHash(`${responseText}\u241f${segmentRoot?.querySelectorAll?.('[data-icl-uuid]').length || 0}\u241f${canvasRecords.map(c => c.title).join('|')}`);
         const prior = turnCache.get(id);
         if (prior && snapshotFingerprints.get(id) === fingerprint) return { ...prior, order };
-        const citationMap = extractCitationMap(turnEl);
-        const tracker = createCitationTracker(citationMap);
+        const citationMap = extractCitationMap(segmentRoot);
+        const fallbackSources = extractFallbackSourceURLs(segmentRoot);
+        const tracker = createCitationTracker(citationMap, fallbackSources);
         debugStats.markdownConversions++;
-        const bodyMarkdown = normalizeMarkdown(aimDomToMarkdown(response, tracker));
+
+        const orderedParts = [
+            ...segment.responseBlocks.map(block => ({ type: 'text', key: block, block })),
+            ...segment.canvasBlocks.map((canvas, index) => ({
+                type: 'canvas',
+                key: canvas.iframe,
+                record: canvasRecords[index]
+            }))
+        ].sort((a, b) => compareDOMOrder(a.key, b.key));
+        const markdownParts = [];
+        let hasTextResponse = false;
+        for (const part of orderedParts) {
+            if (part.type === 'canvas') {
+                markdownParts.push(canvasPlaceholder(part.record.title));
+                continue;
+            }
+            const markdown = normalizeMarkdown(aimDomToMarkdown(part.block, tracker));
+            if (!markdown) continue;
+            markdownParts.push(markdown);
+            hasTextResponse = true;
+        }
+        tracker.addRemainingFallbacks();
+        const bodyMarkdown = normalizeMarkdown(markdownParts.join('\n\n'));
         if (!bodyMarkdown) return null;
         snapshotFingerprints.set(id, fingerprint);
-        const canvasTitle = findCanvasPlaceholder(turnEl);
         return {
             id,
             prompt,
@@ -615,18 +838,32 @@
             date: timestamp,
             bodyMarkdown,
             references: [...tracker.refs.entries()].map(([num, ref]) => ({ num, ...ref })),
-            canvasTitles: canvasTitle ? [canvasTitle] : [],
-            canvasTitle,
+            canvasTitles: canvasRecords.map(record => record.title),
+            canvasTitle: canvasRecords[0]?.title || '',
+            canvasPlaceholdersEmbedded: true,
+            hasTextResponse,
             order
         };
     }
 
+    function snapshotTurn(turnEl, order) {
+        const segment = getConversationSegments(turnEl.parentElement || getConversationHost())
+            .find(candidate => candidate.root === turnEl)
+            || {
+                root: turnEl,
+                promptElement: findPromptForResponseBlock(turnEl),
+                responseBlocks: findResponseBlocks(turnEl),
+                canvasBlocks: findCanvasBlocks(turnEl)
+            };
+        return snapshotConversationSegment(segment, order);
+    }
+
     function captureMountedTurns({ reindex = false, orderStart = 0 } = {}) {
-        const mounted = getMountedTurnElements();
+        const mounted = getConversationSegments();
         let order = reindex ? orderStart : nextTurnOrder;
         let added = 0;
-        for (const turnEl of mounted) {
-            const snapshot = snapshotTurn(turnEl, order);
+        for (const segment of mounted) {
+            const snapshot = snapshotConversationSegment(segment, order);
             if (!snapshot) continue;
             const prior = turnCache.get(snapshot.id);
             if (prior) {
@@ -651,6 +888,15 @@
     function extractConversationTurns() {
         captureMountedTurns();
         return getCachedTurns();
+    }
+
+    function summarizeConversation(turns = getCachedTurns()) {
+        return {
+            segmentCount: turns.length,
+            promptCount: turns.filter(turn => !!(turn.prompt || turn.user)).length,
+            responseCount: turns.filter(turn => turn.hasTextResponse !== false && !!turn.bodyMarkdown).length,
+            canvasCount: turns.reduce((count, turn) => count + (turn.canvasTitles?.length || 0), 0)
+        };
     }
 
     function yamlString(value) {
@@ -690,8 +936,12 @@
 
             if (turn.bodyMarkdown) {
                 let body = turn.bodyMarkdown;
-                const canvasTitle = turn.canvasTitle || turn.canvasTitles?.[0];
-                if (canvasTitle) body += (body ? '\n\n' : '') + `> [Interactive Canvas: ${canvasTitle}]`;
+                if (!turn.canvasPlaceholdersEmbedded) {
+                    const titles = turn.canvasTitles?.length
+                        ? turn.canvasTitles
+                        : (turn.canvasTitle ? [turn.canvasTitle] : []);
+                    for (const title of titles) body += (body ? '\n\n' : '') + canvasPlaceholder(title);
+                }
                 if (body) parts.push(body, '');
                 const refs = formatReferences(turn.references);
                 if (refs) parts.push(refs, '');
@@ -713,7 +963,9 @@
     }
 
     function hasExportableConversation() {
-        return turnCache.size > 0;
+        return [...turnCache.values()].some(turn =>
+            !!(turn.prompt || turn.user) && turn.hasTextResponse === true && !!turn.bodyMarkdown
+        );
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -739,21 +991,14 @@
 
         const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
         while (walker.nextNode()) {
-            const raw = walker.currentNode.textContent;
-            if (!raw.startsWith('TgQPHd|')) continue;
-            const rawJson = raw.slice(7);
-            if (rawJson === '[]') continue;
-            const json = decodeEntities(rawJson);
-            try {
-                const parsed = JSON.parse(json);
-                if (!Array.isArray(parsed)) continue;
-                const htmlStr = findHTMLString(parsed);
-                if (htmlStr) {
-                    console.log(TAG, 'Extracted widget HTML from TgQPHd comment (' + htmlStr.length + ' chars)');
-                    return htmlStr;
-                }
-            } catch (e) {
-                console.warn(TAG, 'Comment JSON parse failed:', e.message?.slice(0, 80));
+            const raw = String(walker.currentNode.textContent || '');
+            if (!raw.includes('TgQPHd|')) continue;
+            const parsed = parseTgPayload(raw);
+            if (!Array.isArray(parsed)) continue;
+            const htmlStr = findHTMLString(parsed);
+            if (htmlStr) {
+                console.log(TAG, 'Extracted widget HTML from TgQPHd comment (' + htmlStr.length + ' chars)');
+                return htmlStr;
             }
         }
         return null;
@@ -785,29 +1030,45 @@
         return 'Interactive_Simulation';
     }
 
+    function registerCanvasIframe(iframe) {
+        const known = canvasByIframe.get(iframe);
+        if (known) return { record: known, added: false };
+        const widgetHTML = extractWidgetHTMLFromComment(iframe);
+        if (!widgetHTML) return { record: null, added: false };
+
+        taggedIframes.add(iframe);
+        const doc = new DOMParser().parseFromString(widgetHTML, 'text/html');
+        const title = extractTitle(doc);
+        const duplicate = registry.find(canvas =>
+            canvas.title === title && Math.abs(canvas.widgetHTML.length - widgetHTML.length) < 100
+        );
+        if (duplicate) {
+            canvasByIframe.set(iframe, duplicate);
+            return { record: duplicate, added: false };
+        }
+
+        const record = {
+            id: registry.length,
+            widgetHTML,
+            title,
+            type: detectType(widgetHTML),
+            iframe
+        };
+        registry.push(record);
+        canvasByIframe.set(iframe, record);
+        console.log(TAG, `Canvas registered: "${title}" [${record.type}]`);
+        return { record, added: true };
+    }
+
+    function getCanvasRecordForIframe(iframe) {
+        return canvasByIframe.get(iframe) || registerCanvasIframe(iframe).record;
+    }
+
     function scanCanvases(root = document) {
         debugStats.canvasScans++;
-        const iframes = findCanvasIframes(root);
         let added = 0;
-        for (const iframe of iframes) {
-            const widgetHTML = extractWidgetHTMLFromComment(iframe);
-            if (widgetHTML) {
-                taggedIframes.add(iframe);
-                const doc = new DOMParser().parseFromString(widgetHTML, 'text/html');
-                const title = extractTitle(doc);
-                const isDupe = registry.some(c =>
-                    c.title === title && Math.abs(c.widgetHTML.length - widgetHTML.length) < 100
-                );
-                if (isDupe) continue;
-                registry.push({
-                    id: registry.length,
-                    widgetHTML,
-                    title,
-                    type: detectType(widgetHTML)
-                });
-                added++;
-                console.log(TAG, `Canvas registered: "${title}" [${detectType(widgetHTML)}]`);
-            }
+        for (const iframe of findCanvasIframes(root)) {
+            if (registerCanvasIframe(iframe).added) added++;
         }
         return added;
     }
@@ -847,6 +1108,7 @@
         snapshotFingerprints.clear();
         registry.length = 0;
         taggedIframes = new WeakSet();
+        canvasByIframe = new WeakMap();
         nextTurnOrder = 0;
         hydratedRouteKey = '';
         hydratedTurnCount = -1;
@@ -858,12 +1120,14 @@
     function updateFABBadge() {
         if (!fabEl) return;
         const canvases = registry.length;
-        const turnCount = turnCache.size;
+        const turnCount = [...turnCache.values()].filter(turn =>
+            !!(turn.prompt || turn.user) && turn.hasTextResponse === true && !!turn.bodyMarkdown
+        ).length;
         const conv = turnCount > 0;
         const badge = fabEl.querySelector('.gce-fab-badge');
         badge.textContent = String(canvases || turnCount);
         fabEl.querySelector('.gce-fab-dot').classList.toggle('on', conv);
-        const turnLabel = `${turnCount} conversation turn${turnCount === 1 ? '' : 's'}`;
+        const turnLabel = `${turnCount} conversation segment${turnCount === 1 ? '' : 's'}`;
         const canvasLabel = `${canvases} canvas${canvases === 1 ? '' : 'es'}`;
         const label = `Export ${turnLabel} and ${canvasLabel}`;
         fabEl.title = label;
@@ -879,7 +1143,15 @@
 
     function reconcileTargetState() {
         const host = getConversationHost();
-        if (!host) turnCache.clear();
+        if (!host) {
+            turnCache.clear();
+            snapshotFingerprints.clear();
+            if (!document.querySelector(SELECTORS.canvasIframe)) {
+                registry.length = 0;
+                taggedIframes = new WeakSet();
+                canvasByIframe = new WeakMap();
+            }
+        }
         const verified = hasExportableConversation() || registry.length > 0;
         if (!verified) {
             abortHydration();
@@ -905,7 +1177,7 @@
         const roots = [...pendingProbeRoots];
         pendingProbeRoots.clear();
         for (const root of roots) scanCanvases(root);
-        if (roots.some(root => root.matches?.(SELECTORS.turn) || root.querySelector?.(SELECTORS.turn))) {
+        if (roots.some(root => root.matches?.(SELECTORS.segmentRoot) || root.querySelector?.(SELECTORS.segmentRoot))) {
             captureMountedTurns();
         }
         const host = getConversationHost();
@@ -932,7 +1204,7 @@
             for (const mutation of mutations) {
                 const targetElement = mutation.target.nodeType === Node.ELEMENT_NODE
                     ? mutation.target : mutation.target.parentElement;
-                const enclosingTurn = targetElement?.closest?.(SELECTORS.turn);
+                const enclosingTurn = targetElement?.closest?.(SELECTORS.segmentRoot);
                 const hasNearbyCanvas = mutation.addedNodes.length > 0 &&
                     (targetElement?.matches?.(SELECTORS.canvasIframe) || targetElement?.querySelector?.(SELECTORS.canvasIframe));
                 if (mutation.type === 'characterData' && enclosingTurn) {
@@ -1044,8 +1316,8 @@
 
     function captureHydrationBatch(seen, orderRef) {
         let added = 0;
-        for (const turnEl of getMountedTurnElements()) {
-            const provisional = snapshotTurn(turnEl, orderRef.value);
+        for (const segment of getConversationSegments()) {
+            const provisional = snapshotConversationSegment(segment, orderRef.value);
             if (!provisional) continue;
             if (!seen.has(provisional.id)) {
                 seen.add(provisional.id);
@@ -1067,7 +1339,7 @@
             return lastHydrationResult;
         }
         const host = getConversationHost();
-        if (!host || !getMountedTurnElements(host).length) return { partial: false, turns: turnCache.size };
+        if (!host || !getConversationSegments(host).length) return { partial: false, turns: turnCache.size };
 
         const controller = new AbortController();
         hydrationController = controller;
@@ -1161,7 +1433,7 @@
   align-items:center;justify-content:center;backdrop-filter:blur(4px);
   font-family:'Google Sans',Roboto,sans-serif}
 .gce-panel{background:#1A1C24;border:1px solid #3a3f50;border-radius:20px;
-  box-shadow:0 24px 64px rgba(0,0,0,.6);color:#E6E8F0;width:540px;max-width:95vw;
+  box-shadow:0 24px 64px rgba(0,0,0,.6);color:#E6E8F0;width:1080px;max-width:95vw;
   max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
 .gce-ph{padding:18px 22px 14px;display:flex;align-items:center;justify-content:space-between;
   border-bottom:1px solid #2D2F38;flex-shrink:0}
@@ -1189,9 +1461,23 @@
 .gce-fi{width:100%;padding:7px 10px;border-radius:7px;border:1px solid #3a3f50;background:#101218;
   color:#E6E8F0;font:11.5px/1.4 'SF Mono','Roboto Mono',monospace;outline:none;box-sizing:border-box}
 .gce-fi:focus{border-color:#5292F9}
-.gce-prev{width:100%;height:120px;padding:10px;border-radius:8px;border:1px solid #2D2F38;
-  background:#101218;color:#ADAFB8;font:11px/1.45 'SF Mono','Roboto Mono',monospace;
-  resize:vertical;box-sizing:border-box;margin-top:8px}
+.gce-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
+.gce-preview-meta{font-size:11px;color:#ADAFB8;margin:5px 0 8px;line-height:1.45}
+.gce-preview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.gce-preview-pane{min-width:0}
+.gce-prev,.gce-rendered{width:100%;height:420px;padding:12px;border-radius:8px;border:1px solid #2D2F38;
+  background:#101218;color:#D7D9E0;box-sizing:border-box;margin:0}
+.gce-prev{font:11px/1.5 'SF Mono','Roboto Mono',monospace;resize:vertical;white-space:pre;overflow:auto}
+.gce-rendered{font:13px/1.55 'Google Sans',Roboto,sans-serif;overflow:auto;overflow-wrap:anywhere}
+.gce-rendered h1,.gce-rendered h2,.gce-rendered h3,.gce-rendered h4,.gce-rendered h5,.gce-rendered h6{color:#F1F3F8;line-height:1.25;margin:18px 0 8px}
+.gce-rendered h1{font-size:21px}.gce-rendered h2{font-size:18px}.gce-rendered h3{font-size:16px}
+.gce-rendered p{margin:0 0 10px}.gce-rendered ul,.gce-rendered ol{padding-left:24px;margin:6px 0 12px}
+.gce-rendered li{margin:4px 0}.gce-rendered blockquote{border-left:3px solid #5292F9;margin:10px 0;padding:8px 12px;background:#182033;color:#C9D9F5}
+.gce-rendered pre{background:#090B10;border:1px solid #2D2F38;border-radius:7px;padding:10px;overflow:auto}
+.gce-rendered code{font-family:'SF Mono','Roboto Mono',monospace;background:#292B34;border-radius:4px;padding:1px 4px}
+.gce-rendered pre code{background:none;padding:0}.gce-rendered a{color:#99C3FF}.gce-rendered hr{border:0;border-top:1px solid #3A3F50;margin:16px 0}
+.gce-rendered table{border-collapse:collapse;width:100%;margin:10px 0;font-size:12px}.gce-rendered th,.gce-rendered td{border:1px solid #3A3F50;padding:6px 8px;text-align:left;vertical-align:top}
+.gce-rendered th{background:#292B34}.gce-md-frontmatter{white-space:pre-wrap;color:#ADAFB8;background:#090B10;border:1px solid #2D2F38;border-radius:7px;padding:10px}
 .gce-sg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .gce-tg{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;user-select:none}
 .gce-tg input[type=checkbox]{width:15px;height:15px;accent-color:#5292F9}
@@ -1214,6 +1500,10 @@
 .gce-toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);z-index:2147483647;
   padding:11px 22px;border-radius:12px;font:600 13px 'Google Sans',sans-serif;
   box-shadow:0 4px 20px rgba(0,0,0,.35);transition:opacity .3s;pointer-events:none}
+@media(max-width:800px){
+  .gce-panel{width:96vw;max-height:94vh}.gce-preview-grid{grid-template-columns:1fr}
+  .gce-prev,.gce-rendered{height:300px}.gce-body{padding:12px 14px}.gce-pf{padding:12px 14px}
+}
 `;
         document.head.appendChild(s);
     }
@@ -1231,6 +1521,165 @@
         fabEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="gce-fab-badge">0</span><span class="gce-fab-dot"></span>`;
         fabEl.addEventListener('click', e => { e.stopPropagation(); openExportPanel(); });
         document.body.appendChild(fabEl);
+    }
+
+    function renderInlineMarkdown(value) {
+        const tokens = [];
+        const stash = html => {
+            const marker = `\u0000${tokens.length}\u0000`;
+            tokens.push(html);
+            return marker;
+        };
+        let html = escapeHTML(value);
+        html = html.replace(/`([^`]+)`/g, (_, code) => stash(`<code>${code}</code>`));
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+            (_, label, href) => stash(`<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`));
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+        html = html.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+        html = html.replace(/\u0000(\d+)\u0000/g, (_, index) => tokens[Number(index)] || '');
+        return html;
+    }
+
+    function splitMarkdownTableRow(line) {
+        const cells = [];
+        let cell = '';
+        let escaped = false;
+        for (const char of line.replace(/^\s*\|/, '').replace(/\|\s*$/, '')) {
+            if (escaped) {
+                cell += char;
+                escaped = false;
+            } else if (char === '\\') {
+                escaped = true;
+                cell += char;
+            } else if (char === '|') {
+                cells.push(cell.trim());
+                cell = '';
+            } else {
+                cell += char;
+            }
+        }
+        cells.push(cell.trim());
+        return cells;
+    }
+
+    function renderListItems(items) {
+        const root = { children: [] };
+        const stack = [{ depth: -1, item: root }];
+        for (const item of items) {
+            while (stack.length > 1 && stack[stack.length - 1].depth >= item.depth) stack.pop();
+            const node = { ...item, children: [] };
+            stack[stack.length - 1].item.children.push(node);
+            stack.push({ depth: item.depth, item: node });
+        }
+        const renderChildren = children => {
+            let html = '';
+            for (let i = 0; i < children.length;) {
+                const ordered = children[i].ordered;
+                const tag = ordered ? 'ol' : 'ul';
+                let group = '';
+                while (i < children.length && children[i].ordered === ordered) {
+                    const child = children[i++];
+                    group += `<li>${renderInlineMarkdown(child.text)}${renderChildren(child.children)}</li>`;
+                }
+                html += `<${tag}>${group}</${tag}>`;
+            }
+            return html;
+        };
+        return renderChildren(root.children);
+    }
+
+    function renderMarkdownPreview(markdown) {
+        const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+        const output = [];
+        let i = 0;
+        if (lines[0] === '---') {
+            const end = lines.indexOf('---', 1);
+            if (end > 0) {
+                output.push(`<pre class="gce-md-frontmatter">${escapeHTML(lines.slice(1, end).join('\n'))}</pre>`);
+                i = end + 1;
+            }
+        }
+        const isSpecial = (line, next) => !line.trim()
+            || /^\s*```/.test(line) || /^#{1,6}\s+/.test(line) || /^\s*>/.test(line)
+            || /^\s*(?:[-*]|\d+\.)\s+/.test(line) || /^\s*(?:---|\*\*\*)\s*$/.test(line)
+            || (line.includes('|') && /^\s*\|?\s*:?-{3,}/.test(next || ''));
+
+        while (i < lines.length) {
+            const line = lines[i];
+            if (!line.trim()) { i++; continue; }
+            const fence = line.match(/^\s*```([^\s]*)/);
+            if (fence) {
+                const code = [];
+                i++;
+                while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+                if (i < lines.length) i++;
+                output.push(`<pre><code data-language="${escapeHTML(fence[1] || '')}">${escapeHTML(code.join('\n'))}</code></pre>`);
+                continue;
+            }
+            const heading = line.match(/^(#{1,6})\s+(.+)$/);
+            if (heading) {
+                const level = heading[1].length;
+                output.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+                i++;
+                continue;
+            }
+            if (/^\s*(?:---|\*\*\*)\s*$/.test(line)) {
+                output.push('<hr>');
+                i++;
+                continue;
+            }
+            if (/^\s*>/.test(line)) {
+                const quote = [];
+                while (i < lines.length && /^\s*>/.test(lines[i])) quote.push(lines[i++].replace(/^\s*>\s?/, ''));
+                output.push(`<blockquote>${quote.map(renderInlineMarkdown).join('<br>')}</blockquote>`);
+                continue;
+            }
+            if (/^\s*(?:[-*]|\d+\.)\s+/.test(line)) {
+                const items = [];
+                while (i < lines.length) {
+                    const item = lines[i].match(/^(\s*)([-*]|\d+\.)\s+(.+)$/);
+                    if (!item) break;
+                    items.push({
+                        depth: Math.floor(item[1].replace(/\t/g, '  ').length / 2),
+                        ordered: /\d+\./.test(item[2]),
+                        text: item[3]
+                    });
+                    i++;
+                }
+                output.push(renderListItems(items));
+                continue;
+            }
+            if (line.includes('|') && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] || '')) {
+                const header = splitMarkdownTableRow(line);
+                i += 2;
+                const rows = [];
+                while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+                    rows.push(splitMarkdownTableRow(lines[i++]));
+                }
+                output.push(`<table><thead><tr>${header.map(cell => `<th>${renderInlineMarkdown(cell)}</th>`).join('')}</tr></thead>` +
+                    `<tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+                continue;
+            }
+
+            const paragraph = [];
+            while (i < lines.length && !isSpecial(lines[i], lines[i + 1])) paragraph.push(lines[i++]);
+            if (!paragraph.length) {
+                paragraph.push(lines[i++]);
+            }
+            const html = paragraph.map(text => {
+                const hardBreak = / {2}$/.test(text);
+                return renderInlineMarkdown(text.replace(/ {2}$/, '')) + (hardBreak ? '<br>' : ' ');
+            }).join('').trim();
+            if (html) output.push(`<p>${html}</p>`);
+        }
+        return output.join('');
+    }
+
+    function formatConversationComposition(summary) {
+        return `${summary.promptCount} prompt${summary.promptCount === 1 ? '' : 's'} · ` +
+            `${summary.responseCount} text response${summary.responseCount === 1 ? '' : 's'} · ` +
+            `${summary.canvasCount} canvas${summary.canvasCount === 1 ? '' : 'es'}`;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1251,6 +1700,7 @@
 
         const threadTitle = extractThreadTitle(getCachedTurns());
         const mdFilename = makeMarkdownFilename(threadTitle);
+        const initialSummary = summarizeConversation();
 
         const ov = document.createElement('div');
         ov.id = 'gce-overlay';
@@ -1262,8 +1712,9 @@
         }) + ' ' + now.toLocaleTimeString('en-US');
 
         const convSection = hasConv ? `
-            <div class="gce-sl">CONVERSATION <span class="gce-pill" id="gce-turn-count">${turnCache.size} turn${turnCache.size !== 1 ? 's' : ''}</span></div>
-            <div class="gce-warn" id="gce-hydration-status">Hydrating the thread to find virtualized turns…</div>
+            <div class="gce-sl">CONVERSATION <span class="gce-pill" id="gce-turn-count">${initialSummary.segmentCount} segment${initialSummary.segmentCount !== 1 ? 's' : ''}</span></div>
+            <div class="gce-preview-meta" id="gce-composition">${escapeHTML(formatConversationComposition(initialSummary))}</div>
+            <div class="gce-warn" id="gce-hydration-status">Hydrating the thread to find virtualized segments…</div>
             <div class="gce-ci">
                 <div class="gce-cr">
                     <input type="checkbox" id="gce-inc-conv" checked>
@@ -1277,10 +1728,24 @@
                     <span class="gce-ml">Markdown filename</span>
                     <input class="gce-fi" id="gce-md-name" value="${escapeHTML(mdFilename)}">
                 </div>
-                <textarea class="gce-prev" id="gce-md-preview" readonly>Generating preview…</textarea>
                 <div class="gce-sg">
                     <label class="gce-tg"><input type="checkbox" id="gce-md-fm" checked> YAML frontmatter</label>
                     <label class="gce-tg"><input type="checkbox" id="gce-md-dates" checked> Turn dates</label>
+                </div>
+                <div class="gce-preview-head">
+                    <span class="gce-sl" style="margin:0">PREVIEW</span>
+                    <button class="gce-sa" id="gce-refresh-preview" type="button">Refresh preview</button>
+                </div>
+                <div class="gce-preview-meta" id="gce-preview-meta">Full preview will render after hydration.</div>
+                <div class="gce-preview-grid">
+                    <div class="gce-preview-pane">
+                        <span class="gce-ml">Raw Markdown</span>
+                        <textarea class="gce-prev" id="gce-md-preview" readonly>Hydrating conversation…</textarea>
+                    </div>
+                    <div class="gce-preview-pane">
+                        <span class="gce-ml">Rendered Preview</span>
+                        <div class="gce-rendered" id="gce-rendered-preview" role="document" aria-label="Rendered Markdown preview">Hydrating conversation…</div>
+                    </div>
                 </div>
             </div>` : '';
 
@@ -1343,14 +1808,19 @@
         ov.querySelector('.gce-x').onclick = closePanel;
 
         let hydrationResult = { partial: false, turns: turnCache.size };
-        const updateConversationPanel = (status) => {
+        const updateConversationPanel = (status, { renderPreview = false } = {}) => {
             const currentTurns = getCachedTurns();
+            const summary = summarizeConversation(currentTurns);
             const pill = ov.querySelector('#gce-turn-count');
-            if (pill) pill.textContent = `${currentTurns.length} turn${currentTurns.length === 1 ? '' : 's'}`;
+            if (pill) pill.textContent = `${summary.segmentCount} segment${summary.segmentCount === 1 ? '' : 's'}`;
+            const compositionEl = ov.querySelector('#gce-composition');
+            if (compositionEl) compositionEl.textContent = formatConversationComposition(summary);
             const statusEl = ov.querySelector('#gce-hydration-status');
             if (statusEl && status) statusEl.textContent = status;
+            if (!renderPreview) return;
             const previewEl = ov.querySelector('#gce-md-preview');
-            if (!previewEl) return;
+            const renderedEl = ov.querySelector('#gce-rendered-preview');
+            if (!previewEl || !renderedEl) return;
             const title = ov.querySelector('#gce-thread-title')?.value.trim() || threadTitle;
             const md = buildConversationMarkdown({
                 turns: currentTurns,
@@ -1359,35 +1829,57 @@
                 turnDates: ov.querySelector('#gce-md-dates')?.checked !== false,
                 srcURL: location.href
             }) || '';
-            previewEl.value = md.slice(0, 3000);
+            previewEl.value = md;
+            renderedEl.innerHTML = renderMarkdownPreview(md);
+            const previewMeta = ov.querySelector('#gce-preview-meta');
+            if (previewMeta) {
+                const hydrationLabel = hydrationResult.partial ? 'partial hydration' : 'hydration complete';
+                previewMeta.textContent = `${md.length.toLocaleString()} characters · ` +
+                    `${summary.segmentCount} segment${summary.segmentCount === 1 ? '' : 's'} · ` +
+                    `${summary.promptCount} prompt${summary.promptCount === 1 ? '' : 's'} · ` +
+                    `${summary.responseCount} text response${summary.responseCount === 1 ? '' : 's'} · ` +
+                    `${summary.canvasCount} canvas${summary.canvasCount === 1 ? '' : 'es'} · ${hydrationLabel}`;
+            }
         };
 
         if (hasConv) {
             const idle = window.requestIdleCallback || (cb => setTimeout(cb, 0));
-            idle(() => updateConversationPanel('Hydrating the thread to find virtualized turns…'));
+            idle(() => updateConversationPanel('Hydrating the thread to find virtualized segments…'));
             hydrateConversation(progress => {
                 if (document.body.contains(ov)) {
-                    updateConversationPanel(`Hydrating… ${progress.turns} turn${progress.turns === 1 ? '' : 's'} cached`);
+                    updateConversationPanel(`Hydrating… ${progress.turns} segment${progress.turns === 1 ? '' : 's'} cached`);
                 }
             }).then(result => {
                 hydrationResult = result;
                 if (!document.body.contains(ov)) return;
                 updateConversationPanel(result.partial
-                    ? `Hydration reached its safety limit; ${result.turns} cached turns will be exported as a partial result.`
-                    : `Hydration complete: ${result.turns} turn${result.turns === 1 ? '' : 's'} ready.`);
+                    ? `Hydration reached its safety limit; ${result.turns} cached segments will be exported as a partial result.`
+                    : `Hydration complete: ${result.turns} segment${result.turns === 1 ? '' : 's'} ready.`,
+                { renderPreview: true });
             });
         }
 
         const titleInput = ov.querySelector('#gce-thread-title');
         const mdNameInput = ov.querySelector('#gce-md-name');
+        let previewRefreshTimer = null;
+        const schedulePreviewRefresh = () => {
+            clearTimeout(previewRefreshTimer);
+            previewRefreshTimer = setTimeout(() => {
+                const idle = window.requestIdleCallback || (cb => setTimeout(cb, 0));
+                idle(() => updateConversationPanel(null, { renderPreview: true }), { timeout: 500 });
+            }, 180);
+        };
         if (titleInput && mdNameInput) {
             titleInput.addEventListener('input', () => {
                 mdNameInput.value = makeMarkdownFilename(titleInput.value.trim());
-                updateConversationPanel();
+                schedulePreviewRefresh();
             });
         }
-        ov.querySelector('#gce-md-fm')?.addEventListener('change', () => updateConversationPanel());
-        ov.querySelector('#gce-md-dates')?.addEventListener('change', () => updateConversationPanel());
+        ov.querySelector('#gce-md-fm')?.addEventListener('change', schedulePreviewRefresh);
+        ov.querySelector('#gce-md-dates')?.addEventListener('change', schedulePreviewRefresh);
+        ov.querySelector('#gce-refresh-preview')?.addEventListener('click', () =>
+            updateConversationPanel(null, { renderPreview: true })
+        );
 
         let canvasAllOn = true;
         const canvasToggle = ov.querySelector('.gce-canvas-toggle');
@@ -1413,7 +1905,7 @@
             if (wantConv) {
                 hydrationResult = await hydrateConversation(progress => {
                     if (document.body.contains(ov)) {
-                        updateConversationPanel(`Hydrating… ${progress.turns} turn${progress.turns === 1 ? '' : 's'} cached`);
+                        updateConversationPanel(`Hydrating… ${progress.turns} segment${progress.turns === 1 ? '' : 's'} cached`);
                     }
                 });
                 const title = ov.querySelector('#gce-thread-title')?.value.trim() || threadTitle;
@@ -1481,6 +1973,7 @@
         ov.querySelector('#gce-export-all')?.addEventListener('click', () => runExport('all'));
         ov.querySelector('#gce-conv-only')?.addEventListener('click', () => runExport('conv'));
         ov.querySelector('#gce-canvas-only')?.addEventListener('click', () => runExport('canvas'));
+        return ov;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1701,6 +2194,13 @@
             isConversationRouteCandidate,
             deriveRouteKey,
             getConversationHost,
+            getConversationSegments,
+            findResponseBlocks,
+            findPromptForResponseBlock,
+            findCanvasBlocks,
+            associateCanvasesWithSegments,
+            snapshotConversationSegment,
+            buildSegmentOrderKey,
             getMountedTurnElements,
             extractUserText,
             extractTurnDate,
@@ -1711,7 +2211,10 @@
             captureMountedTurns,
             extractConversationTurns,
             getCachedTurns,
+            summarizeConversation,
             buildConversationMarkdown,
+            renderMarkdownPreview,
+            openExportPanel,
             hasExportableConversation,
             scanCanvases,
             buildExportHTML,
@@ -1722,7 +2225,7 @@
             scheduleDiscovery,
             startObserver,
             stopObserver,
-            getRegistry: () => registry.map(item => ({ ...item })),
+            getRegistry: () => registry.map(({ id, widgetHTML, title, type }) => ({ id, widgetHTML, title, type })),
             getUIState: () => ({
                 fab: !!document.querySelector('.gce-fab'),
                 badge: document.querySelector('.gce-fab-badge')?.textContent || '',

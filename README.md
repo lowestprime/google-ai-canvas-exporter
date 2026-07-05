@@ -1,6 +1,6 @@
-# Google AI Canvas Exporter v5.0.2
+# Google AI Canvas Exporter v5.0.3
 
-Export complete Google Search AI Mode conversations as clean Markdown and interactive canvas widgets as self-contained offline HTML. v5.0.2 detects virtualized conversation turns, hydrates older turns when the export panel opens, maps inline citations to their real source metadata, and keeps the established v4 canvas reconstruction pipeline intact.
+Export complete Google Search AI Mode conversations as clean Markdown and interactive canvas widgets as self-contained offline HTML. v5.0.3 adds ordered mixed-content segments for threads where later prompts, responses, and canvases are rendered outside the first `.CKgc1d`; it also provides a full raw Markdown preview beside a safely rendered preview. The established v4 canvas reconstruction pipeline remains intact.
 
 The userscript is deliberately fail-closed. It may be installed on broad `google.com/search` URL patterns for userscript-manager compatibility, but it creates no FAB, badge, panel, styles, export action, or long-running observer on an ordinary Search page. Empty AI Mode home also remains inactive. UI appears only after the current route contains either a complete prompt/response turn or a successfully decoded WidgetHelpers canvas.
 
@@ -35,15 +35,16 @@ google.com/search (parent page — user sees the canvas here)
 
 1. A strict runtime route/evidence gate distinguishes ordinary Search, empty AI Mode home, real conversation threads, and decoded canvases.
 2. A route-scoped observer inspects only relevant added nodes and coalesces discovery into debounced idle work.
-3. Every `.CKgc1d` prompt/response pair is cached as a detached snapshot, so Google can unmount its DOM without losing the turn.
+3. Ordered conversation segments are built from classic `.CKgc1d` turns and newer mixed-content roots such as `[data-xid="pJN44d"]` / `.Eltaeb`. Detached snapshots retain prompts, response blocks, references, and canvas positions when Google unmounts the DOM.
 4. For each canvas iframe, a `TreeWalker` searches the surrounding DOM for `<!--TgQPHd|…-->` comments and recursively locates WidgetHelpers HTML.
 
 ### Conversation Markdown
 
-- Prompts come from `.ilZyRc.R7mRQb`; responses come only from `[data-xid="VpUvz"]` / `[jsname="KFl8ub"]`.
+- Prompts come from classic `.ilZyRc.R7mRQb` / `.tonYlb` structures and the mixed-content `.Ax52xb` structure. Responses are the deepest substantive `[data-xid="VpUvz"]` / `[jsname="KFl8ub"]` blocks, not a whole Google UI wrapper.
+- Canvases are associated with the nearest ordered segment and appear in Markdown as `> [Interactive Canvas: TITLE]` at their real position between response blocks.
 - Opening the panel starts a bounded top-to-bottom hydration pass. It advances by about 75% of the viewport, waits for DOM quiet, caches newly mounted turns, stops after two stable bottom passes or the 30-second/200-step cap, and restores the original scroll position.
 - Google role headings, paragraph divs, nested lists, tables, fenced/inline code, blockquotes, thematic breaks, and hard breaks are converted to Markdown.
-- `.WBgIic` citation UUIDs are resolved through hidden `TgQPHd` metadata. Each cited response gets inline numbered links and one deduplicated `### References` block.
+- `.WBgIic` citation UUIDs are resolved through hidden `TgQPHd` metadata. Saved pages with empty UUID markers use ordered, filtered source records from the same segment. Each cited response gets inline numbered links and one deduplicated `### References` block.
 - Share/feedback controls, source carousels, policy UI, dialogs, sidebars, canvas DOM, favicons, thumbnails, and empty list sentinels are excluded.
 - YAML string values are quoted, and frontmatter reports the actual hydrated turn count and exporter version.
 
@@ -62,9 +63,9 @@ google.com/search (parent page — user sees the canvas here)
 
 1. Open a real Google AI Mode conversation or a Search result containing an AI-generated interactive canvas.
 2. Wait for the bottom-right **FAB** to appear after exportable evidence is verified. No FAB on ordinary Search or empty AI Mode home is expected behavior.
-3. Read the badge as the canvas count when canvases exist, otherwise as the cached conversation-turn count. The green dot means a complete conversation snapshot exists.
-4. Click the FAB. Conversation hydration starts automatically and the panel reports current turn count and progress.
-5. Review the Markdown preview, title, filename, dates/frontmatter settings, canvases, filenames, theme, viewport, and metadata settings.
+3. Read the badge as the canvas count when canvases exist, otherwise as the cached conversation-segment count. The green dot means a complete text conversation snapshot exists.
+4. Click the FAB. Conversation hydration starts automatically and the panel reports segment, prompt, text-response, canvas, character, and completion counts.
+5. Review the complete raw Markdown and the safely rendered side-by-side preview, plus title, filename, dates/frontmatter settings, canvases, filenames, theme, viewport, and metadata settings. The preview switches to one column on narrow screens.
 6. Choose **Export All**, **Conversation Only**, or **Canvases Only**. Conversation export waits for the active hydration pass; batch downloads remain staggered.
 
 If the hydration safety cap is reached, every cached turn remains exportable and the panel/result is explicitly labeled partial.
@@ -114,4 +115,4 @@ node --check userscript/Google_AI_Canvas_Exporter.user.js
 git diff --check
 ```
 
-`test/validate-markdown.mjs` executes the production userscript's test API against both saved real-page fixtures and requires exactly five ordered turns from each. `test/exporter.test.mjs` covers URL gates, empty-home behavior, virtualized replacement, scroll hydration/restoration, golden Markdown/citations, FAB state, observer coalescing, and canvas reconstruction invariants.
+`test/validate-markdown.mjs` executes the production userscript's test API against both five-turn saved pages and the Formal Classification mixed-content fixture. `test/exporter.test.mjs` covers URL gates, empty-home behavior, virtualized replacement, scroll hydration/restoration, classic and mixed-content Markdown/citations, exact canvas placement, full untruncated raw/rendered preview state, FAB state, observer coalescing, and canvas reconstruction invariants.

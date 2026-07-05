@@ -3,7 +3,7 @@
 
 Export Google AI Search mode conversations as clean Markdown and interactive canvas widgets as self-contained offline HTML. Conversation export captures all user/AI turns with inline citations, compact reference blocks, YAML frontmatter, and smart filenames. Canvas export detects Widget Shell V2 in sandboxed scf.usercontent.goog iframes, strips CSP/sandbox artifacts, extracts WidgetHelpers + CDN deps, and supports batch download via a unified floating export panel.
 
-[Reinstall version 5.0.1](https://update.greasyfork.org/scripts/572688/Google%20AI%20Canvas%20Exporter.user.js)[?](/en/help/installing-user-scripts "How to install")
+[Reinstall version 5.0.3](https://update.greasyfork.org/scripts/572688/Google%20AI%20Canvas%20Exporter.user.js)[?](/en/help/installing-user-scripts "How to install")
 Author
 
 [lowestprime](/en/users/823161-lowestprime)
@@ -22,7 +22,7 @@ Ratings
 
 Version
 
-5.0.1
+5.0.3
 
 Created
 
@@ -148,6 +148,13 @@ Requirements
 Export Google AI Search mode conversations as clean Markdown and interactive canvas widgets as self-contained offline HTML. Conversation export captures all user/AI turns with inline citations, compact reference blocks, YAML frontmatter, and smart filenames. Canvas export detects Widget Shell V2 in sandboxed scf.usercontent.goog iframes, strips CSP/sandbox artifacts, extracts WidgetHelpers + CDN deps, and supports batch download via a unified floating export panel.
 
 These are versions of this script where the code was updated. [Show all versions.](/en/scripts/572688-google-ai-canvas-exporter/versions?show_all_versions=1)
+
+*    v5.0.3 2026-07-05
+
+    Version 5.0.3
+    -------------
+
+    Mixed-content conversation export repair. Later prompts, text responses, inline canvases, and references rendered outside the first `.CKgc1d` are now exported as ordered segments. `TgQPHd||` widget payloads are decoded, canvas placeholders remain at their DOM position, and the panel shows full raw Markdown beside an escaped rendered preview with accurate composition and character counts. Ordinary Search and empty AI Mode home remain fail-closed; the established canvas HTML reconstruction behavior is preserved.
 
 *    [v5.0.1](/en/scripts/572688-google-ai-canvas-exporter?version=1864440) 2026-06-30
     

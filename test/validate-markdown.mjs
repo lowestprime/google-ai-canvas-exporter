@@ -30,4 +30,29 @@ for (const fixture of fixtures) {
     console.log(`[PASS] ${fixture}: 5 ordered turns and clean Markdown`);
 }
 
+const formalFixture = 'dev_artifacts/Single_File_Export_Formal_Classification_of_Fine_Hardwood_Furniture_Google_Search_07042026_114124_AM-PST.html';
+{
+    const { dom, api } = loadUserscript(readRepoFile(formalFixture),
+        'https://www.google.com/search?udm=50&q=Formal+Classification+of+Fine+Hardwood+Furniture');
+    const turns = api.extractConversationTurns();
+    const summary = api.summarizeConversation(turns);
+    assert.equal(turns.length, 2, 'Formal Classification must expose two ordered mixed-content segments');
+    assert.equal(summary.promptCount, 2);
+    assert.equal(summary.responseCount, 2);
+    assert.equal(summary.canvasCount, 1);
+    const markdown = api.buildConversationMarkdown({
+        turns,
+        title: 'Formal Classification of Fine Hardwood Furniture',
+        frontmatter: true,
+        turnDates: true
+    });
+    assert.match(markdown, /turns: 2/);
+    assert.match(markdown, /simulate the physics of splayed legs vs straight legs for stability/);
+    assert.match(markdown, /The Mechanics of Stability/);
+    assert.match(markdown, /> \[Interactive Canvas: Stability Physics: Splay Angle Simulator\]/);
+    assert.doesNotMatch(markdown, /Copied|Copy Edit|Share public link|AI-generated, may include mistakes|Privacy Policy|Show all/);
+    dom.window.close();
+    console.log(`[PASS] ${formalFixture}: 2 prompts, 2 responses, 1 canvas, clean Markdown`);
+}
+
 console.log('[PASS] production userscript fixture validation complete');
