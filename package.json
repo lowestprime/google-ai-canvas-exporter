@@ -1,0 +1,13 @@
+{
+  "name": "google-ai-canvas-exporter-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:fixtures": "node test/validate-markdown.mjs",
+    "test:browser-server": "node test/browser-fixture-server.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

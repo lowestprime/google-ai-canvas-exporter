@@ -4,7 +4,7 @@
 // @author            lowestprime x Claude Opus 4.6 Max Agent
 // @namespace         https://greasyfork.org/en/users/823161-lowestprime
 // @license           MIT
-// @version           5.0.1
+// @version           5.0.2
 // @match             *://www.google.com/search*
 // @match             *://*.google.com/search*
 // @grant             none
@@ -16,7 +16,7 @@
     'use strict';
 
     const TAG = '[GCE]';
-    const VERSION = '5.0.1';
+    const VERSION = '5.0.2';
     const WH_APIS = [
         'WH.createApp', 'WH.initCanvas', 'WH.initD3',
         'WH.initPlot', 'WH.initThree', 'WH.initPhysics'
@@ -30,13 +30,49 @@
         'script', 'style', 'svg', 'noscript', 'button', 'nav', 'iframe',
         'input', 'select', 'textarea', 'form'
     ]);
-    const TAGGED = new WeakSet();
+    const SELECTORS = Object.freeze({
+        conversationHost: '[jsname="coFSxe"], [jsname="guest_container_"]',
+        turn: '.CKgc1d',
+        turnRoot: '[data-xid="aim-mars-turn-root"]',
+        prompt: '.ilZyRc.R7mRQb',
+        legacyPrompt: '.tonYlb',
+        response: '[data-xid="VpUvz"], [jsname="KFl8ub"].mZJni',
+        citation: '.WBgIic',
+        canvasIframe: 'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc',
+        probe: '[jsname="coFSxe"], [jsname="guest_container_"], .CKgc1d, ' +
+            'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc'
+    });
+    const TEST_MODE = globalThis.__GCE_TEST_MODE__ === true;
+    let taggedIframes = new WeakSet();
     const registry = [];
+    const turnCache = new Map();
+    const snapshotFingerprints = new Map();
+    const debugStats = {
+        mutationCallbacks: 0,
+        scheduledWork: 0,
+        canvasScans: 0,
+        turnCaptures: 0,
+        markdownConversions: 0
+    };
     let fabEl = null;
-    let cachedTurnCount = 0;
     let lastBadgeCanvas = -1;
     let lastBadgeTurn = -1;
-    let badgeTimer = null;
+    let currentRouteKey = '';
+    let nextTurnOrder = 0;
+    let workTimer = null;
+    let observer = null;
+    let observerRoot = null;
+    let discoveryDeadline = 0;
+    let routeTimer = null;
+    let lastLocationHref = location.href;
+    let hydrationPromise = null;
+    let hydrationController = null;
+    let hydrationRestore = null;
+    let hydratedRouteKey = '';
+    let hydratedTurnCount = -1;
+    let lastHydrationResult = null;
+    const pendingProbeRoots = new Set();
+    let scrollListening = false;
 
     console.log(TAG, `v${VERSION} active on`, location.hostname);
 
@@ -139,37 +175,54 @@
     //  CONVERSATION — thread title, turn extraction, markdown
     // ═══════════════════════════════════════════════════════════
 
-    function isAIModePage() {
-        return new URLSearchParams(location.search).get('udm') === '50'
-            || !!document.querySelector('[jsname="coFSxe"], [data-xid="aim-mars-turn-root"]');
+    function isPotentialAIModeURL(href = location.href) {
+        try {
+            const url = new URL(href, location.href);
+            return url.pathname === '/search' && url.searchParams.get('udm') === '50';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isConversationRouteCandidate(href = location.href) {
+        if (!isPotentialAIModeURL(href)) return false;
+        const url = new URL(href, location.href);
+        return !!(getActiveThreadId() || url.searchParams.get('mstk') || url.searchParams.get('mtid')
+            || textCompact(url.searchParams.get('q') || ''));
+    }
+
+    function getActiveThreadId() {
+        const active = document.querySelector(
+            'button[data-thread-id][aria-current="page"], ' +
+            'button[data-thread-id][aria-selected="true"], ' +
+            'button.qqMZif.gkM3Zc[data-thread-id], button.qqMZif.MwdR7[data-thread-id]'
+        );
+        return active?.getAttribute('data-thread-id') || '';
+    }
+
+    function deriveRouteKey(href = location.href) {
+        const url = new URL(href, location.href);
+        const threadId = getActiveThreadId();
+        if (threadId) return `thread:${threadId}`;
+        const stateId = url.searchParams.get('mstk') || url.searchParams.get('mtid');
+        if (stateId) return `state:${stateId}`;
+        const mode = url.searchParams.get('udm') || 'search';
+        const query = textCompact(url.searchParams.get('q') || '');
+        return `${url.pathname}|${mode}|${query}`;
     }
 
     function getConversationHost() {
-        if (!isAIModePage()) return null;
-        return document.querySelector('[jsname="coFSxe"]')
-            || document.querySelector('[jsname="guest_container_"]')
+        if (!isConversationRouteCandidate()) return null;
+        return document.querySelector(SELECTORS.conversationHost)
+            || document.querySelector(SELECTORS.turnRoot)?.parentElement
+            || document.querySelector(SELECTORS.turn)?.parentElement
             || null;
     }
 
-    function getCheapTurnCount() {
-        const host = getConversationHost();
-        if (!host) return 0;
-        let count = 0;
-        for (const el of host.querySelectorAll('[data-xid="aim-mars-turn-root"]')) {
-            if (!el.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]')) count++;
-        }
-        return count;
-    }
-
-    function scheduleBadgeUpdate() {
-        clearTimeout(badgeTimer);
-        badgeTimer = setTimeout(refreshBadgeState, 400);
-    }
-
-    function refreshBadgeState() {
-        if (!fabEl) return;
-        cachedTurnCount = isAIModePage() ? getCheapTurnCount() : 0;
-        updateFABBadge();
+    function getMountedTurnElements(root = getConversationHost()) {
+        if (!root) return [];
+        const turns = root.matches?.(SELECTORS.turn) ? [root] : [...root.querySelectorAll(SELECTORS.turn)];
+        return turns.filter(el => !el.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]'));
     }
 
     function extractThreadTitle(turns) {
@@ -187,30 +240,39 @@
         const t = document.title.replace(/\s*-\s*Google Search\s*$/i, '').trim();
         if (t && t.length > 3) return t;
 
-        if (turns?.[0]?.user) {
-            const u = turns[0].user;
+        if (turns?.[0]?.prompt || turns?.[0]?.user) {
+            const u = turns[0].prompt || turns[0].user;
             return u.length > 80 ? u.slice(0, 77) + '...' : u;
         }
         return 'AI_Mode_Thread';
     }
 
     function extractUserText(turnEl) {
-        const el = turnEl.querySelector('.tonYlb .ilZyRc.R7mRQb')
-              || turnEl.querySelector('.ilZyRc.R7mRQb')
-              || turnEl.querySelector('[data-xid="VpUvz"]')
-              || turnEl.querySelector('.tonYlb');
-        return el ? textCompact(el.textContent) : '';
+        const prompt = turnEl?.querySelector(SELECTORS.prompt);
+        if (prompt) {
+            const heading = prompt.querySelector('[role="heading"]');
+            if (heading) {
+                const clone = heading.cloneNode(true);
+                clone.querySelectorAll('button, [role="button"], .iMqumd, [aria-hidden="true"]')
+                    .forEach(el => el.remove());
+                const clean = textCompact(clone.textContent).replace(/^You said:\s*/i, '');
+                if (clean) return clean;
+            }
+            const copy = prompt.querySelector('button[aria-label^="Copy "]')?.getAttribute('aria-label');
+            if (copy) return textCompact(copy.replace(/^Copy\s+/i, ''));
+        }
+        const legacy = turnEl?.querySelector(SELECTORS.legacyPrompt);
+        if (!legacy) return '';
+        const clone = legacy.cloneNode(true);
+        clone.querySelectorAll('button, [role="button"], .iMqumd, time, .kwdzO').forEach(el => el.remove());
+        return textCompact(clone.textContent).replace(/^You said:\s*/i, '');
     }
 
     function extractTurnDate(turnEl) {
-        const dateEl = turnEl.querySelector('time, [data-xid="DChuCc"]');
-        const raw = dateEl
-            ? (dateEl.textContent || '')
-            : (turnEl.textContent || '').slice(0, 500);
-        const m = raw.match(
-            /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b/
-        );
-        return m ? m[0] : '';
+        const dateEl = turnEl?.querySelector('time, .kwdzO, [data-xid="DChuCc"]');
+        if (!dateEl) return '';
+        const datetime = dateEl.getAttribute('datetime');
+        return textCompact(datetime || dateEl.textContent || '');
     }
 
     function isNoiseLink(href, label) {
@@ -231,7 +293,87 @@
         return false;
     }
 
-    function createCitationTracker() {
+    function isSourceURL(url) {
+        if (!url || !/^https?:\/\//i.test(url)) return false;
+        try {
+            const host = new URL(url).hostname.toLowerCase();
+            if (host === 'google.com' || host === 'www.google.com') return false;
+        } catch (_) { return false; }
+        return !/(?:favicon|encrypted-tbn|gstatic\.com\/images|googleusercontent\.com\/proxy|google\.com\/logos|\.svg(?:\?|$)|\.png(?:\?|$)|\.jpe?g(?:\?|$)|\.webp(?:\?|$))/i.test(url);
+    }
+
+    function collectHTTPStrings(value, output) {
+        if (typeof value === 'string') {
+            if (isSourceURL(value)) output.push(value);
+            return;
+        }
+        if (Array.isArray(value)) value.forEach(item => collectHTTPStrings(item, output));
+        else if (value && typeof value === 'object') Object.values(value).forEach(item => collectHTTPStrings(item, output));
+    }
+
+    function collectUUIDRecords(value, uuid, output) {
+        if (!value || (typeof value !== 'object')) return;
+        const children = Array.isArray(value) ? value : Object.values(value);
+        if (children.some(item => item === uuid)) {
+            collectHTTPStrings(value, output);
+            return;
+        }
+        children.forEach(item => collectUUIDRecords(item, uuid, output));
+    }
+
+    function preferArticleURLs(urls) {
+        const normalized = [];
+        const seen = new Set();
+        for (const raw of urls) {
+            const url = normUrl(raw);
+            if (!url || !isSourceURL(url) || seen.has(url)) continue;
+            seen.add(url);
+            normalized.push(url);
+        }
+        const articleHosts = new Set(normalized.filter(url => {
+            try {
+                const parsed = new URL(url);
+                return parsed.pathname !== '/' || parsed.search;
+            } catch (_) { return false; }
+        }).map(url => new URL(url).host));
+        return normalized.filter(url => {
+            const parsed = new URL(url);
+            return parsed.pathname !== '/' || parsed.search || !articleHosts.has(parsed.host);
+        });
+    }
+
+    function extractCitationMap(turnEl) {
+        const uuids = [...turnEl.querySelectorAll(`${SELECTORS.citation} button[data-icl-uuid]`)]
+            .map(button => button.getAttribute('data-icl-uuid')).filter(Boolean);
+        const uniqueUUIDs = [...new Set(uuids)];
+        const parsedPayloads = [];
+        const walker = document.createTreeWalker(turnEl, NodeFilter.SHOW_COMMENT);
+        while (walker.nextNode()) {
+            const raw = String(walker.currentNode.textContent || '');
+            if (!raw.includes('TgQPHd|')) continue;
+            const start = raw.indexOf('TgQPHd|') + 7;
+            try {
+                parsedPayloads.push(JSON.parse(decodeEntities(raw.slice(start))));
+            } catch (_) {
+                const bracket = raw.indexOf('[', start);
+                if (bracket < 0) continue;
+                try { parsedPayloads.push(JSON.parse(decodeEntities(raw.slice(bracket)))); } catch (_) { /* ignored */ }
+            }
+        }
+        const result = new Map();
+        for (const uuid of uniqueUUIDs) {
+            const urls = [];
+            parsedPayloads.forEach(payload => collectUUIDRecords(payload, uuid, urls));
+            const markerButton = [...turnEl.querySelectorAll(`${SELECTORS.citation} button[data-icl-uuid]`)]
+                .find(button => button.getAttribute('data-icl-uuid') === uuid);
+            const marker = markerButton?.closest(SELECTORS.citation);
+            marker?.querySelectorAll('a[href]').forEach(a => urls.push(a.href));
+            result.set(uuid, preferArticleURLs(urls));
+        }
+        return result;
+    }
+
+    function createCitationTracker(citationMap = new Map()) {
         const map = new Map();
         const refs = new Map();
         let n = 1;
@@ -246,6 +388,9 @@
                 }
                 return map.get(k);
             },
+            addUUID(uuid) {
+                return (citationMap.get(uuid) || []).map(url => ({ num: this.add(url), url })).filter(x => x.num);
+            },
             refs
         };
     }
@@ -257,12 +402,12 @@
     function prepareCloneForMarkdown(root) {
         const clone = root.cloneNode(true);
         clone.querySelectorAll(
-            '[data-tpcrb-host], .kWjn6e, [data-xid="m3fCN"], ' +
-            '.emqXtf, iframe, [data-inline-canvas], .Lucn7c, .ZAjsj'
+            '[data-xid="Gd7Hsc"], [data-xid="aim-aside-initial-corroboration-container"], ' +
+            '[data-tpcrb-host], .kWjn6e, [data-xid="m3fCN"], .ofHStc, .qmNpEc, ' +
+            '.emqXtf, iframe, [data-inline-canvas], .Lucn7c, .ZAjsj, ' +
+            '[role="dialog"], [aria-modal="true"], aside, nav, form'
         ).forEach(n => n.remove());
-        clone.querySelectorAll('img').forEach(img => {
-            if (shouldDropImage(img)) img.remove();
-        });
+        clone.querySelectorAll('button:not([data-icl-uuid]), input, select, textarea, img, picture, source').forEach(n => n.remove());
         clone.querySelectorAll('svg').forEach(s => s.remove());
         return clone;
     }
@@ -274,7 +419,7 @@
             return String(s ?? '').replace(/[`*_[\]]/g, m => '\\' + m);
         }
 
-        function walk(node, ctx = { inPre: false, inTable: false }) {
+        function walk(node, ctx = { inPre: false, inTable: false, listDepth: 0 }) {
             if (!node) return '';
             if (node.nodeType === Node.TEXT_NODE) {
                 const t = node.nodeValue || '';
@@ -285,6 +430,12 @@
 
             const el = node;
             const tag = el.tagName.toLowerCase();
+            if (el.matches(SELECTORS.citation)) {
+                const tokens = [...el.querySelectorAll('button[data-icl-uuid]')]
+                    .flatMap(button => citeTracker.addUUID(button.getAttribute('data-icl-uuid')))
+                    .map(({ num, url }) => inlineCite(num, url));
+                return [...new Set(tokens)].join('');
+            }
             if (DROP_TAGS.has(tag)) return '';
             if (el.closest('[data-tpcrb-host], .kWjn6e')) return '';
             if (tag === 'img') return shouldDropImage(el) ? '' : '';
@@ -295,19 +446,21 @@
                 const href = normUrl(el.getAttribute('href') || '');
                 if (!href || isNoiseLink(href, textCompact(el.textContent))) return children();
                 const label = textCompact(el.textContent);
-                const num = citeTracker.add(href);
-                if (num && (!label || /^\d+$/.test(label))) return inlineCite(num, href);
+                if (!label || /^\d+$/.test(label)) {
+                    const num = citeTracker.add(href);
+                    if (num) return inlineCite(num, href);
+                }
                 if (!label) return `[${getDomain(href)}](${href})`;
                 return `[${escInline(label)}](${href})`;
             }
 
-            if (/^h[1-6]$/.test(tag)) {
-                const lvl = Number(tag[1]);
+            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"]')) {
+                const lvl = /^h[1-6]$/.test(tag) ? Number(tag[1]) : 2;
                 const t = textCompact(children());
                 return t ? `\n${'#'.repeat(lvl)} ${t}\n\n` : '';
             }
-            if (tag === 'p') {
-                const t = textCompact(children());
+            if (tag === 'p' || el.matches('div.n6owBd')) {
+                const t = children().trim();
                 return t ? `\n${t}\n\n` : '';
             }
             if (tag === 'br') return '  \n';
@@ -332,26 +485,35 @@
                 return `\n\`\`\`${lang}\n${body}\n\`\`\`\n\n`;
             }
             if (tag === 'blockquote') {
-                const inner = children().trim().split('\n').map(l => l.trim() ? `> ${l}` : '>').join('\n');
+                const inner = children().trim().split('\n').map(l => l.trim() ? `> ${l.trim()}` : '>').join('\n');
                 return inner ? `\n${inner}\n\n` : '';
             }
             if (tag === 'ul' || tag === 'ol') {
                 const items = [...el.children].filter(c => c.tagName?.toLowerCase() === 'li');
                 if (!items.length) return children();
-                let out = '\n';
+                const indent = '  '.repeat(ctx.listDepth);
+                let out = ctx.listDepth ? '' : '\n';
                 items.forEach((li, i) => {
                     const bullet = tag === 'ol' ? `${i + 1}. ` : '- ';
-                    const body = walk(li, { ...ctx, inTable: false }).trim();
-                    out += bullet + body + '\n';
+                    const direct = [...li.childNodes]
+                        .filter(child => !(child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)))
+                        .map(child => walk(child, { ...ctx, inTable: false, listDepth: ctx.listDepth + 1 }))
+                        .join('').trim();
+                    const nested = [...li.children]
+                        .filter(child => /^(ul|ol)$/i.test(child.tagName))
+                        .map(child => walk(child, { ...ctx, listDepth: ctx.listDepth + 1 })).join('');
+                    if (!direct && !nested.trim()) return;
+                    if (direct) out += `${indent}${bullet}${direct}\n`;
+                    out += nested;
                 });
-                return out + '\n';
+                return out + (ctx.listDepth ? '' : '\n');
             }
             if (tag === 'li') return children();
             if (tag === 'table') {
                 const rows = [];
                 for (const tr of el.querySelectorAll('tr')) {
                     const cells = [...tr.querySelectorAll('th,td')].map(td =>
-                        textCompact(walk(td, { ...ctx, inTable: true }))
+                        textCompact(walk(td, { ...ctx, inTable: true })).replace(/\|/g, '\\|').replace(/\n/g, '<br>')
                     );
                     if (cells.length) rows.push('| ' + cells.join(' | ') + ' |');
                 }
@@ -372,22 +534,35 @@
     }
 
     function normalizeMarkdown(md) {
-        return String(md || '')
-            .replace(/\r\n/g, '\n')
-            .replace(/[ \t]+\n/g, '\n')
-            .replace(/!\[[^\]]*\]\([^)]*(?:faviconV2|encrypted-tbn|data:image)[^)]*\)/gi, '')
-            .replace(/\[\]\((https?:\/\/[^)]+)\)/g, (_, u) => `[${getDomain(u)}](${u})`)
-            .replace(/ \+1\b/g, '')
-            .replace(/\\_/g, '_')
-            .replace(/\n{3,}/g, '\n\n')
-            .replace(/([^\n])\n(\d+\. )/g, '$1\n\n$2')
-            .trim();
+        const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+        const out = [];
+        let inFence = false;
+        let blank = false;
+        for (let line of lines) {
+            if (/^\s*```/.test(line)) inFence = !inFence;
+            if (!inFence) {
+                const hardBreak = / {2}$/.test(line);
+                line = line.replace(/[ \t]+$/g, hardBreak ? '  ' : '');
+                line = line.replace(/ \+1\b/g, '').replace(/\\_/g, '_');
+                if (/^\s*(?:-|\d+\.)\s*$/.test(line)) line = '';
+            }
+            if (!inFence && !line.trim()) {
+                if (!blank && out.length) out.push('');
+                blank = true;
+                continue;
+            }
+            out.push(line);
+            blank = false;
+        }
+        return out.join('\n').trim();
     }
 
-    function formatReferences(citeTracker) {
-        if (!citeTracker.refs.size) return '';
+    function formatReferences(source) {
+        const refs = source?.refs || source;
+        if (!refs || (Array.isArray(refs) ? refs.length === 0 : refs.size === 0)) return '';
         const lines = ['### References', ''];
-        for (const [num, ref] of [...citeTracker.refs.entries()].sort((a, b) => a[0] - b[0])) {
+        const entries = Array.isArray(refs) ? refs.map((ref, i) => [ref.num || i + 1, ref]) : [...refs.entries()];
+        for (const [num, ref] of entries.sort((a, b) => a[0] - b[0])) {
             lines.push(`[${num}] [${ref.name}](${ref.href})`);
         }
         return lines.join('\n');
@@ -404,40 +579,82 @@
         return 'Interactive Canvas';
     }
 
-    function extractConversationTurns() {
-        const host = getConversationHost();
-        if (!host) return [];
-        const turns = [];
-        const roots = [...host.querySelectorAll('[data-xid="aim-mars-turn-root"]')]
-            .filter(el => !el.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]'));
-
-        const pushTurn = (user, aiEl, date, canvasTitle) => {
-            const u = textCompact(user);
-            if (!u && !aiEl) return;
-            turns.push({ user: u, aiEl, date: date || '', canvasTitle: canvasTitle || '' });
-        };
-
-        if (roots.length) {
-            for (const root of roots) {
-                const user = extractUserText(root);
-                const aiEl = root.querySelector('.CKgc1d');
-                pushTurn(user, aiEl, extractTurnDate(root), findCanvasPlaceholder(root));
-            }
-        } else {
-            const users = [...host.querySelectorAll('.tonYlb')]
-                .filter(el => !el.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]'));
-            const ais = [...host.querySelectorAll('.CKgc1d')]
-                .filter(el => !el.closest('[data-xid="aim-mars-input-plate"], [data-xid="m3fCN"]'));
-            const n = Math.max(users.length, ais.length);
-            for (let i = 0; i < n; i++) {
-                const user = users[i] ? extractUserText(users[i].closest('[data-xid="aim-mars-turn-root"]') || users[i]) : '';
-                const aiEl = ais[i] || null;
-                const container = users[i]?.closest('[data-xid="aim-mars-turn-root"]') || ais[i];
-                pushTurn(user, aiEl, container ? extractTurnDate(container) : '', container ? findCanvasPlaceholder(container) : '');
-            }
+    function stringHash(value) {
+        let hash = 2166136261;
+        for (let i = 0; i < value.length; i++) {
+            hash ^= value.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
         }
+        return (hash >>> 0).toString(36);
+    }
 
-        return turns.filter(t => t.user || t.aiEl);
+    function snapshotTurn(turnEl, order) {
+        const prompt = extractUserText(turnEl);
+        const response = turnEl.querySelector(SELECTORS.response);
+        const responseText = response ? textCompact(response.textContent) : '';
+        if (!prompt || !response || !responseText) return null;
+        const timestamp = extractTurnDate(turnEl);
+        const stable = turnEl.id || turnEl.getAttribute('data-ved')
+            || turnEl.querySelector('[data-ved]')?.getAttribute('data-ved');
+        const id = stable ? `dom:${stable}` : `content:${stringHash(`${prompt}\u241f${timestamp}\u241f${responseText.slice(0, 500)}`)}`;
+        const fingerprint = stringHash(`${responseText}\u241f${turnEl.querySelectorAll('[data-icl-uuid]').length}`);
+        const prior = turnCache.get(id);
+        if (prior && snapshotFingerprints.get(id) === fingerprint) return { ...prior, order };
+        const citationMap = extractCitationMap(turnEl);
+        const tracker = createCitationTracker(citationMap);
+        debugStats.markdownConversions++;
+        const bodyMarkdown = normalizeMarkdown(aimDomToMarkdown(response, tracker));
+        if (!bodyMarkdown) return null;
+        snapshotFingerprints.set(id, fingerprint);
+        const canvasTitle = findCanvasPlaceholder(turnEl);
+        return {
+            id,
+            prompt,
+            user: prompt,
+            timestamp,
+            date: timestamp,
+            bodyMarkdown,
+            references: [...tracker.refs.entries()].map(([num, ref]) => ({ num, ...ref })),
+            canvasTitles: canvasTitle ? [canvasTitle] : [],
+            canvasTitle,
+            order
+        };
+    }
+
+    function captureMountedTurns({ reindex = false, orderStart = 0 } = {}) {
+        const mounted = getMountedTurnElements();
+        let order = reindex ? orderStart : nextTurnOrder;
+        let added = 0;
+        for (const turnEl of mounted) {
+            const snapshot = snapshotTurn(turnEl, order);
+            if (!snapshot) continue;
+            const prior = turnCache.get(snapshot.id);
+            if (prior) {
+                snapshot.order = reindex ? order : prior.order;
+                turnCache.set(snapshot.id, { ...prior, ...snapshot });
+            } else {
+                turnCache.set(snapshot.id, snapshot);
+                added++;
+            }
+            order++;
+        }
+        if (reindex) nextTurnOrder = Math.max(nextTurnOrder, order);
+        else nextTurnOrder = order;
+        debugStats.turnCaptures += mounted.length;
+        return { added, nextOrder: order };
+    }
+
+    function getCachedTurns() {
+        return [...turnCache.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    }
+
+    function extractConversationTurns() {
+        captureMountedTurns();
+        return getCachedTurns();
+    }
+
+    function yamlString(value) {
+        return JSON.stringify(String(value ?? ''));
     }
 
     function buildConversationMarkdown(opts) {
@@ -453,9 +670,9 @@
             });
             parts.push(
                 '---',
-                `title: ${title}`,
-                `source: ${opts.srcURL || location.href}`,
-                `exported: ${exported}`,
+                `title: ${yamlString(title)}`,
+                `source: ${yamlString(opts.srcURL || location.href)}`,
+                `exported: ${yamlString(exported)}`,
                 `turns: ${turns.length}`,
                 `exporter: Google AI Canvas Exporter v${VERSION}`,
                 '---',
@@ -464,12 +681,21 @@
         }
 
         turns.forEach((turn, idx) => {
-            if (turn.user) parts.push(`You said: ${turn.user}`, '');
-            if (opts.turnDates !== false && turn.date) {
-                parts.push(turn.date, '');
+            const prompt = turn.prompt || turn.user;
+            const timestamp = turn.timestamp || turn.date;
+            if (prompt) parts.push(`You said: ${prompt}`, '');
+            if (opts.turnDates !== false && timestamp) {
+                parts.push(timestamp, '');
             }
 
-            if (turn.aiEl) {
+            if (turn.bodyMarkdown) {
+                let body = turn.bodyMarkdown;
+                const canvasTitle = turn.canvasTitle || turn.canvasTitles?.[0];
+                if (canvasTitle) body += (body ? '\n\n' : '') + `> [Interactive Canvas: ${canvasTitle}]`;
+                if (body) parts.push(body, '');
+                const refs = formatReferences(turn.references);
+                if (refs) parts.push(refs, '');
+            } else if (turn.aiEl) {
                 const citeTracker = createCitationTracker();
                 let body = normalizeMarkdown(aimDomToMarkdown(turn.aiEl, citeTracker));
                 if (turn.canvasTitle) {
@@ -487,17 +713,18 @@
     }
 
     function hasExportableConversation() {
-        return cachedTurnCount > 0 || getCheapTurnCount() > 0;
+        return turnCache.size > 0;
     }
 
     // ═══════════════════════════════════════════════════════════
     //  CANVAS DETECTION
     // ═══════════════════════════════════════════════════════════
 
-    function findCanvasIframes() {
-        return [...document.querySelectorAll(
-            'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc'
-        )].filter(f => !TAGGED.has(f));
+    function findCanvasIframes(root = document) {
+        const found = [];
+        if (root.matches?.(SELECTORS.canvasIframe)) found.push(root);
+        root.querySelectorAll?.(SELECTORS.canvasIframe).forEach(iframe => found.push(iframe));
+        return found.filter(iframe => !taggedIframes.has(iframe));
     }
 
     function extractWidgetHTMLFromComment(iframe) {
@@ -558,13 +785,14 @@
         return 'Interactive_Simulation';
     }
 
-    function scan() {
-        const iframes = findCanvasIframes();
+    function scanCanvases(root = document) {
+        debugStats.canvasScans++;
+        const iframes = findCanvasIframes(root);
         let added = 0;
         for (const iframe of iframes) {
-            TAGGED.add(iframe);
             const widgetHTML = extractWidgetHTMLFromComment(iframe);
             if (widgetHTML) {
+                taggedIframes.add(iframe);
                 const doc = new DOMParser().parseFromString(widgetHTML, 'text/html');
                 const title = extractTitle(doc);
                 const isDupe = registry.some(c =>
@@ -581,7 +809,326 @@
                 console.log(TAG, `Canvas registered: "${title}" [${detectType(widgetHTML)}]`);
             }
         }
-        if (added > 0) scheduleBadgeUpdate();
+        return added;
+    }
+
+    function removeExporterUI() {
+        document.getElementById('gce-overlay')?.remove();
+        fabEl?.remove();
+        fabEl = null;
+        document.getElementById('gce-styles')?.remove();
+        lastBadgeCanvas = -1;
+        lastBadgeTurn = -1;
+    }
+
+    function abortHydration() {
+        hydrationController?.abort();
+        hydrationController = null;
+        hydrationPromise = null;
+        if (hydrationRestore) {
+            hydrationRestore();
+            hydrationRestore = null;
+        }
+    }
+
+    function stopObserver() {
+        observer?.disconnect();
+        observer = null;
+        observerRoot = null;
+        clearTimeout(workTimer);
+        workTimer = null;
+        pendingProbeRoots.clear();
+    }
+
+    function resetRouteState(routeKey = deriveRouteKey()) {
+        abortHydration();
+        stopObserver();
+        turnCache.clear();
+        snapshotFingerprints.clear();
+        registry.length = 0;
+        taggedIframes = new WeakSet();
+        nextTurnOrder = 0;
+        hydratedRouteKey = '';
+        hydratedTurnCount = -1;
+        lastHydrationResult = null;
+        currentRouteKey = routeKey;
+        removeExporterUI();
+    }
+
+    function updateFABBadge() {
+        if (!fabEl) return;
+        const canvases = registry.length;
+        const turnCount = turnCache.size;
+        const conv = turnCount > 0;
+        const badge = fabEl.querySelector('.gce-fab-badge');
+        badge.textContent = String(canvases || turnCount);
+        fabEl.querySelector('.gce-fab-dot').classList.toggle('on', conv);
+        const turnLabel = `${turnCount} conversation turn${turnCount === 1 ? '' : 's'}`;
+        const canvasLabel = `${canvases} canvas${canvases === 1 ? '' : 'es'}`;
+        const label = `Export ${turnLabel} and ${canvasLabel}`;
+        fabEl.title = label;
+        fabEl.setAttribute('aria-label', label);
+        if (canvases !== lastBadgeCanvas || turnCount !== lastBadgeTurn) {
+            lastBadgeCanvas = canvases;
+            lastBadgeTurn = turnCount;
+            fabEl.classList.remove('gce-pop');
+            void fabEl.offsetWidth;
+            fabEl.classList.add('gce-pop');
+        }
+    }
+
+    function reconcileTargetState() {
+        const host = getConversationHost();
+        if (!host) turnCache.clear();
+        const verified = hasExportableConversation() || registry.length > 0;
+        if (!verified) {
+            abortHydration();
+            document.getElementById('gce-overlay')?.remove();
+            fabEl?.remove();
+            fabEl = null;
+            document.getElementById('gce-styles')?.remove();
+            return false;
+        }
+        ensureFAB();
+        updateFABBadge();
+        return true;
+    }
+
+    function nodeContainsProbe(node) {
+        return node?.nodeType === Node.ELEMENT_NODE &&
+            (node.matches?.(SELECTORS.probe) || node.querySelector?.(SELECTORS.probe));
+    }
+
+    function runScheduledDiscovery() {
+        workTimer = null;
+        debugStats.scheduledWork++;
+        const roots = [...pendingProbeRoots];
+        pendingProbeRoots.clear();
+        for (const root of roots) scanCanvases(root);
+        if (roots.some(root => root.matches?.(SELECTORS.turn) || root.querySelector?.(SELECTORS.turn))) {
+            captureMountedTurns();
+        }
+        const host = getConversationHost();
+        if (host && observerRoot !== host) startObserver(host);
+        reconcileTargetState();
+    }
+
+    function scheduleDiscovery(root = document.documentElement) {
+        if (root) pendingProbeRoots.add(root);
+        clearTimeout(workTimer);
+        workTimer = setTimeout(() => {
+            const idle = window.requestIdleCallback || (callback => setTimeout(callback, 0));
+            idle(runScheduledDiscovery, { timeout: 500 });
+        }, 250);
+    }
+
+    function startObserver(root) {
+        if (!root || observerRoot === root) return;
+        stopObserver();
+        observerRoot = root;
+        observer = new MutationObserver(mutations => {
+            debugStats.mutationCallbacks++;
+            let relevant = false;
+            for (const mutation of mutations) {
+                const targetElement = mutation.target.nodeType === Node.ELEMENT_NODE
+                    ? mutation.target : mutation.target.parentElement;
+                const enclosingTurn = targetElement?.closest?.(SELECTORS.turn);
+                const hasNearbyCanvas = mutation.addedNodes.length > 0 &&
+                    (targetElement?.matches?.(SELECTORS.canvasIframe) || targetElement?.querySelector?.(SELECTORS.canvasIframe));
+                if (mutation.type === 'characterData' && enclosingTurn) {
+                    pendingProbeRoots.add(enclosingTurn);
+                    relevant = true;
+                    continue;
+                }
+                for (const node of mutation.addedNodes) {
+                    if (nodeContainsProbe(node)) {
+                        pendingProbeRoots.add(node);
+                        relevant = true;
+                    } else if (enclosingTurn) {
+                        pendingProbeRoots.add(enclosingTurn);
+                        relevant = true;
+                    } else if (hasNearbyCanvas) {
+                        pendingProbeRoots.add(targetElement);
+                        relevant = true;
+                    }
+                }
+            }
+            if (relevant) scheduleDiscovery(null);
+        });
+        observer.observe(root, {
+            childList: true,
+            subtree: true,
+            characterData: root !== document.documentElement
+        });
+    }
+
+    function onPassiveScroll() {
+        if (hasExportableConversation()) scheduleDiscovery(getConversationHost() || document.documentElement);
+    }
+
+    function installScrollListener() {
+        if (scrollListening) return;
+        window.addEventListener('scroll', onPassiveScroll, { passive: true, capture: true });
+        scrollListening = true;
+    }
+
+    function reconcileRoute() {
+        const hrefChanged = lastLocationHref !== location.href;
+        const routeKey = deriveRouteKey();
+        if (routeKey !== currentRouteKey) {
+            resetRouteState(routeKey);
+            lastLocationHref = location.href;
+            discoveryDeadline = isPotentialAIModeURL() ? Number.POSITIVE_INFINITY : Date.now() + 10000;
+            startObserver(document.documentElement);
+            if (isConversationRouteCandidate()) setTimeout(() => scheduleDiscovery(document.documentElement), 300);
+            return;
+        }
+        lastLocationHref = location.href;
+
+        scanCanvases(document);
+        if (getConversationHost()) captureMountedTurns();
+        reconcileTargetState();
+
+        const host = getConversationHost();
+        if (host) startObserver(host);
+        else if (isPotentialAIModeURL() || registry.length || Date.now() < discoveryDeadline) {
+            startObserver(document.documentElement);
+        } else if (hrefChanged || Date.now() >= discoveryDeadline) {
+            stopObserver();
+        }
+    }
+
+    function getScrollContainer() {
+        const host = getConversationHost();
+        for (let node = host; node && node !== document.body; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 20) return node;
+        }
+        return document.scrollingElement || document.documentElement;
+    }
+
+    function setScrollPosition(container, top) {
+        if (container === document.scrollingElement || container === document.documentElement || container === document.body) {
+            container.scrollTop = top;
+        } else {
+            container.scrollTop = top;
+        }
+    }
+
+    function getScrollPosition(container) {
+        return container === document.scrollingElement || container === document.documentElement || container === document.body
+            ? window.scrollY : container.scrollTop;
+    }
+
+    function waitForMutationQuiet(root, signal, quietMs = 180, maxMs = 900) {
+        return new Promise(resolve => {
+            if (signal.aborted) return resolve();
+            let quietTimer;
+            const finish = () => {
+                clearTimeout(quietTimer);
+                clearTimeout(maxTimer);
+                quietObserver.disconnect();
+                resolve();
+            };
+            const reset = () => {
+                clearTimeout(quietTimer);
+                quietTimer = setTimeout(finish, quietMs);
+            };
+            const quietObserver = new MutationObserver(reset);
+            quietObserver.observe(root || document.documentElement, { childList: true, subtree: true });
+            const maxTimer = setTimeout(finish, maxMs);
+            signal.addEventListener('abort', finish, { once: true });
+            reset();
+        });
+    }
+
+    function captureHydrationBatch(seen, orderRef) {
+        let added = 0;
+        for (const turnEl of getMountedTurnElements()) {
+            const provisional = snapshotTurn(turnEl, orderRef.value);
+            if (!provisional) continue;
+            if (!seen.has(provisional.id)) {
+                seen.add(provisional.id);
+                provisional.order = orderRef.value++;
+            } else {
+                provisional.order = turnCache.get(provisional.id)?.order ?? provisional.order;
+            }
+            if (!turnCache.has(provisional.id)) added++;
+            turnCache.set(provisional.id, provisional);
+        }
+        nextTurnOrder = Math.max(nextTurnOrder, orderRef.value);
+        return added;
+    }
+
+    async function hydrateConversation(onProgress) {
+        if (hydrationPromise) return hydrationPromise;
+        if (hydratedRouteKey === currentRouteKey && hydratedTurnCount === turnCache.size && lastHydrationResult) {
+            onProgress?.({ turns: turnCache.size, steps: 0, added: 0 });
+            return lastHydrationResult;
+        }
+        const host = getConversationHost();
+        if (!host || !getMountedTurnElements(host).length) return { partial: false, turns: turnCache.size };
+
+        const controller = new AbortController();
+        hydrationController = controller;
+        const { signal } = controller;
+        hydrationPromise = (async () => {
+            const container = getScrollContainer();
+            const savedTop = getScrollPosition(container);
+            let restored = false;
+            hydrationRestore = () => {
+                if (restored) return;
+                restored = true;
+                setScrollPosition(container, savedTop);
+            };
+            const started = Date.now();
+            const seen = new Set();
+            const orderRef = { value: 0 };
+            let stableBottom = 0;
+            let lastCount = -1;
+            let steps = 0;
+            let partial = false;
+            try {
+                setScrollPosition(container, 0);
+                await waitForMutationQuiet(host, signal);
+                while (!signal.aborted) {
+                    const added = captureHydrationBatch(seen, orderRef);
+                    reconcileTargetState();
+                    onProgress?.({ turns: turnCache.size, steps, added });
+                    const viewport = Math.max(container.clientHeight || window.innerHeight || 600, 200);
+                    const maxTop = Math.max(0, container.scrollHeight - viewport);
+                    const top = getScrollPosition(container);
+                    const atBottom = top >= maxTop - 4;
+                    if (atBottom && turnCache.size === lastCount && added === 0) stableBottom++;
+                    else if (atBottom) stableBottom = 1;
+                    else stableBottom = 0;
+                    lastCount = turnCache.size;
+                    if (stableBottom >= 2) break;
+                    if (++steps >= 200 || Date.now() - started >= 30000) {
+                        partial = true;
+                        break;
+                    }
+                    setScrollPosition(container, Math.min(maxTop, top + Math.max(1, Math.floor(viewport * 0.75))));
+                    await waitForMutationQuiet(host, signal);
+                }
+            } finally {
+                hydrationRestore?.();
+                hydrationRestore = null;
+            }
+            const result = { partial: partial || signal.aborted, turns: turnCache.size };
+            if (!signal.aborted) {
+                hydratedRouteKey = currentRouteKey;
+                hydratedTurnCount = turnCache.size;
+                lastHydrationResult = result;
+            }
+            return result;
+        })().finally(() => {
+            if (hydrationController === controller) {
+                hydrationPromise = null;
+                hydrationController = null;
+            }
+        });
+        return hydrationPromise;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -686,22 +1233,6 @@
         document.body.appendChild(fabEl);
     }
 
-    function updateFABBadge() {
-        if (!fabEl) return;
-        const canvases = registry.length;
-        const turnCount = cachedTurnCount;
-        const conv = turnCount > 0;
-        fabEl.querySelector('.gce-fab-badge').textContent = canvases || (conv ? turnCount : 0);
-        fabEl.querySelector('.gce-fab-dot').classList.toggle('on', conv);
-        if (canvases !== lastBadgeCanvas || turnCount !== lastBadgeTurn) {
-            lastBadgeCanvas = canvases;
-            lastBadgeTurn = turnCount;
-            fabEl.classList.remove('gce-pop');
-            void fabEl.offsetWidth;
-            if (canvases > 0 || conv) fabEl.classList.add('gce-pop');
-        }
-    }
-
     // ═══════════════════════════════════════════════════════════
     //  UNIFIED EXPORT PANEL
     // ═══════════════════════════════════════════════════════════
@@ -709,8 +1240,8 @@
     function openExportPanel() {
         document.getElementById('gce-overlay')?.remove();
 
-        const turns = extractConversationTurns();
-        const hasConv = turns.length > 0;
+        captureMountedTurns();
+        const hasConv = hasExportableConversation();
         const hasCanvas = registry.length > 0;
 
         if (!hasConv && !hasCanvas) {
@@ -718,7 +1249,7 @@
             return;
         }
 
-        const threadTitle = extractThreadTitle(turns);
+        const threadTitle = extractThreadTitle(getCachedTurns());
         const mdFilename = makeMarkdownFilename(threadTitle);
 
         const ov = document.createElement('div');
@@ -730,13 +1261,9 @@
             year: 'numeric', month: 'long', day: 'numeric'
         }) + ' ' + now.toLocaleTimeString('en-US');
 
-        const convWarn = hasConv && turns.length < 2
-            ? '<div class="gce-warn">Only ' + turns.length + ' turn detected. Scroll through the full thread before exporting to load all turns.</div>'
-            : '';
-
         const convSection = hasConv ? `
-            <div class="gce-sl">CONVERSATION <span class="gce-pill">${turns.length} turn${turns.length !== 1 ? 's' : ''}</span></div>
-            ${convWarn}
+            <div class="gce-sl">CONVERSATION <span class="gce-pill" id="gce-turn-count">${turnCache.size} turn${turnCache.size !== 1 ? 's' : ''}</span></div>
+            <div class="gce-warn" id="gce-hydration-status">Hydrating the thread to find virtualized turns…</div>
             <div class="gce-ci">
                 <div class="gce-cr">
                     <input type="checkbox" id="gce-inc-conv" checked>
@@ -808,21 +1335,47 @@
         </div>`;
 
         document.body.appendChild(ov);
-        ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-        ov.querySelector('.gce-x').onclick = () => ov.remove();
+        const closePanel = () => {
+            abortHydration();
+            ov.remove();
+        };
+        ov.addEventListener('click', e => { if (e.target === ov) closePanel(); });
+        ov.querySelector('.gce-x').onclick = closePanel;
+
+        let hydrationResult = { partial: false, turns: turnCache.size };
+        const updateConversationPanel = (status) => {
+            const currentTurns = getCachedTurns();
+            const pill = ov.querySelector('#gce-turn-count');
+            if (pill) pill.textContent = `${currentTurns.length} turn${currentTurns.length === 1 ? '' : 's'}`;
+            const statusEl = ov.querySelector('#gce-hydration-status');
+            if (statusEl && status) statusEl.textContent = status;
+            const previewEl = ov.querySelector('#gce-md-preview');
+            if (!previewEl) return;
+            const title = ov.querySelector('#gce-thread-title')?.value.trim() || threadTitle;
+            const md = buildConversationMarkdown({
+                turns: currentTurns,
+                title,
+                frontmatter: ov.querySelector('#gce-md-fm')?.checked !== false,
+                turnDates: ov.querySelector('#gce-md-dates')?.checked !== false,
+                srcURL: location.href
+            }) || '';
+            previewEl.value = md.slice(0, 3000);
+        };
 
         if (hasConv) {
-            const previewEl = ov.querySelector('#gce-md-preview');
-            const genPreview = () => {
-                if (!document.body.contains(ov) || !previewEl) return;
-                const md = buildConversationMarkdown({
-                    turns, title: threadTitle, frontmatter: true,
-                    turnDates: true, srcURL: location.href
-                }) || '';
-                previewEl.value = md.slice(0, 3000);
-            };
             const idle = window.requestIdleCallback || (cb => setTimeout(cb, 0));
-            idle(genPreview);
+            idle(() => updateConversationPanel('Hydrating the thread to find virtualized turns…'));
+            hydrateConversation(progress => {
+                if (document.body.contains(ov)) {
+                    updateConversationPanel(`Hydrating… ${progress.turns} turn${progress.turns === 1 ? '' : 's'} cached`);
+                }
+            }).then(result => {
+                hydrationResult = result;
+                if (!document.body.contains(ov)) return;
+                updateConversationPanel(result.partial
+                    ? `Hydration reached its safety limit; ${result.turns} cached turns will be exported as a partial result.`
+                    : `Hydration complete: ${result.turns} turn${result.turns === 1 ? '' : 's'} ready.`);
+            });
         }
 
         const titleInput = ov.querySelector('#gce-thread-title');
@@ -830,8 +1383,11 @@
         if (titleInput && mdNameInput) {
             titleInput.addEventListener('input', () => {
                 mdNameInput.value = makeMarkdownFilename(titleInput.value.trim());
+                updateConversationPanel();
             });
         }
+        ov.querySelector('#gce-md-fm')?.addEventListener('change', () => updateConversationPanel());
+        ov.querySelector('#gce-md-dates')?.addEventListener('change', () => updateConversationPanel());
 
         let canvasAllOn = true;
         const canvasToggle = ov.querySelector('.gce-canvas-toggle');
@@ -847,15 +1403,22 @@
         }
 
         async function runExport(mode) {
+            const exportButton = ov.querySelector('#gce-export-all');
+            if (exportButton) exportButton.disabled = true;
             const srcURL = ov.querySelector('#gce-url')?.value || location.href;
             const jobs = [];
 
-            const wantConv = (mode === 'all' || mode === 'conv') && hasConv &&
+            const wantConv = (mode === 'all' || mode === 'conv') && hasExportableConversation() &&
                 (mode !== 'all' || ov.querySelector('#gce-inc-conv')?.checked !== false);
             if (wantConv) {
+                hydrationResult = await hydrateConversation(progress => {
+                    if (document.body.contains(ov)) {
+                        updateConversationPanel(`Hydrating… ${progress.turns} turn${progress.turns === 1 ? '' : 's'} cached`);
+                    }
+                });
                 const title = ov.querySelector('#gce-thread-title')?.value.trim() || threadTitle;
                 const md = buildConversationMarkdown({
-                    turns,
+                    turns: getCachedTurns(),
                     title,
                     frontmatter: ov.querySelector('#gce-md-fm')?.checked !== false,
                     turnDates: ov.querySelector('#gce-md-dates')?.checked !== false,
@@ -888,10 +1451,12 @@
             }
 
             if (!jobs.length) {
+                if (exportButton) exportButton.disabled = false;
                 showToast('Nothing selected to export.', true);
                 return;
             }
 
+            abortHydration();
             ov.remove();
             let mdCount = 0, htmlCount = 0;
             for (let i = 0; i < jobs.length; i++) {
@@ -909,7 +1474,8 @@
             const parts = [];
             if (mdCount) parts.push('conversation');
             if (htmlCount) parts.push(`${htmlCount} canvas${htmlCount !== 1 ? 'es' : ''}`);
-            showToast(`Exported ${parts.join(' + ')} successfully.`);
+            const partial = mdCount && hydrationResult.partial ? ' (partial hydration)' : '';
+            showToast(`Exported ${parts.join(' + ')} successfully${partial}.`);
         }
 
         ov.querySelector('#gce-export-all')?.addEventListener('click', () => runExport('all'));
@@ -1126,23 +1692,81 @@
     //  INITIALIZATION
     // ═══════════════════════════════════════════════════════════
 
-    ensureFAB();
+    function exposeTestAPI() {
+        globalThis.__GCE_TEST_API__ = Object.freeze({
+            VERSION,
+            SELECTORS,
+            debugStats,
+            isPotentialAIModeURL,
+            isConversationRouteCandidate,
+            deriveRouteKey,
+            getConversationHost,
+            getMountedTurnElements,
+            extractUserText,
+            extractTurnDate,
+            extractCitationMap,
+            aimDomToMarkdown,
+            normalizeMarkdown,
+            snapshotTurn,
+            captureMountedTurns,
+            extractConversationTurns,
+            getCachedTurns,
+            buildConversationMarkdown,
+            hasExportableConversation,
+            scanCanvases,
+            buildExportHTML,
+            reconcileTargetState,
+            reconcileRoute,
+            resetRouteState,
+            hydrateConversation,
+            scheduleDiscovery,
+            startObserver,
+            stopObserver,
+            getRegistry: () => registry.map(item => ({ ...item })),
+            getUIState: () => ({
+                fab: !!document.querySelector('.gce-fab'),
+                badge: document.querySelector('.gce-fab-badge')?.textContent || '',
+                dot: document.querySelector('.gce-fab-dot')?.classList.contains('on') || false,
+                title: document.querySelector('.gce-fab')?.getAttribute('aria-label') || ''
+            })
+        });
+    }
 
-    const observer = new MutationObserver(scan);
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    if (TEST_MODE) {
+        exposeTestAPI();
+        return;
+    }
 
-    const t0 = Date.now();
-    const poll = setInterval(() => {
-        scan();
-        if (isAIModePage()) scheduleBadgeUpdate();
-        if (Date.now() - t0 > 60000) clearInterval(poll);
-    }, 2000);
+    function scheduleRouteReconcile() {
+        setTimeout(reconcileRoute, 0);
+    }
 
-    scan();
-    scheduleBadgeUpdate();
-    setTimeout(scan, 3000);
-    setTimeout(scan, 8000);
-    setTimeout(scheduleBadgeUpdate, 3000);
-    setTimeout(scheduleBadgeUpdate, 8000);
+    for (const method of ['pushState', 'replaceState']) {
+        const original = history[method];
+        history[method] = function (...args) {
+            const result = original.apply(this, args);
+            scheduleRouteReconcile();
+            return result;
+        };
+    }
+    window.addEventListener('popstate', scheduleRouteReconcile);
+    installScrollListener();
+
+    currentRouteKey = deriveRouteKey();
+    discoveryDeadline = isPotentialAIModeURL() ? Number.POSITIVE_INFINITY : Date.now() + 10000;
+    reconcileRoute();
+    routeTimer = setInterval(() => {
+        const routeChanged = lastLocationHref !== location.href || deriveRouteKey() !== currentRouteKey;
+        if (routeChanged) {
+            discoveryDeadline = isPotentialAIModeURL() ? Number.POSITIVE_INFINITY : Date.now() + 10000;
+            reconcileRoute();
+        } else if (observerRoot && observerRoot !== document.documentElement && !document.contains(observerRoot)) {
+            turnCache.clear();
+            reconcileTargetState();
+            startObserver(document.documentElement);
+        } else if (!fabEl && !getConversationHost() && Date.now() >= discoveryDeadline) {
+            stopObserver();
+        }
+    }, 500);
 
 })();

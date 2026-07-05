@@ -1,5 +1,5 @@
 ---
-title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.0"
+title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.2"
 date: 2026-04-05
 source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 ---
@@ -9,6 +9,31 @@ source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 One-click export of Google AI Search mode interactive canvas widgets (simulations, visualizations, 3D scenes) as fully self-contained offline HTML files. Automatically detects Widget Shell V2 content inside sandboxed scf.usercontent.goog iframes, strips Google's CSP/sandbox restrictions, extracts WidgetHelpers + simulation logic + CDN dependencies (D3, Plot, Three.js, Matter.js, KaTeX, anime.js), eliminates the "Ghost UI" duplication bug, injects fallback fonts, and reconstructs a clean standalone document with dark/light mode toggle and full-viewport sizing.
 
 ---
+
+## Version 5.0.2
+2026-07-02
+
+Conversation export and activation repair. This release replaces wrapper-root counting and global UI state with strict runtime evidence gates, route-scoped caches, virtualized turn hydration, and production-backed fixture tests.
+
+### Root causes fixed
+
+| Failure | Root cause and correction |
+|---|---|
+| Only one turn exported | One `[data-xid="aim-mars-turn-root"]` wrapped five `.CKgc1d` turns, but v5.0.1 queried only its first `.CKgc1d`. Each `.CKgc1d` is now extracted independently. |
+| Prompt/response conflation | `[data-xid="VpUvz"]` was incorrectly used as a prompt fallback. Prompts and responses now use separate evidenced selectors. |
+| False green dot / `1 turn` | The badge counted wrapper roots and retained global state across SPA navigation. It now reflects complete snapshots in the active semantic route. |
+| FAB on ordinary Search / AI home | Startup called `ensureFAB()` unconditionally and `udm=50` alone was accepted. UI now requires a complete turn or decoded WidgetHelpers canvas and is removed on route teardown. |
+| Missing virtualized history | Export depended on currently mounted DOM. Idle snapshot caching plus bounded top-to-bottom hydration retains turns through unmount/remount cycles and restores scroll. |
+| Markdown noise and flattening | The full turn container was converted. v5.0.2 converts only the response body, handles Google's role headings/paragraphs/lists/tables/code/hard breaks, and strips controls, dialogs, source asides, canvases, images, and sentinel items. |
+| Incorrect citations | Generic source-card links were treated as citations. `.WBgIic` UUIDs now resolve through per-turn `TgQPHd` payloads, with normalized inline links and one references block per cited response. |
+| Broad observer work | Every mutation triggered a document-wide canvas scan. Added-node probes now coalesce into idle work, scope to the conversation host, and reuse content fingerprints for unchanged turns. |
+| Non-portable validator | The test copied production algorithms, pointed outside the repo, allowed one turn, and had no declared dependency. Tests now call a conditional production API, use repository fixtures, declare locked `jsdom`, and require five turns. |
+
+### Compatibility
+
+- Canvas HTML reconstruction retains all six WidgetHelpers signatures, whitespace-tolerant helper detection, CDN/font preservation, CSP/sandbox removal, Ghost UI exclusion, dark/light configuration, absolute zero-width resize target, full viewport, and staggered batch download.
+- The distributed userscript remains dependency-free with `@grant none` and no conversation persistence or external transmission.
+- Automated fixture/static validation is recorded in `dev_logs/execplan_v5.0.2_ai_mode_export.md`; Chrome/Firefox live-account status is recorded in `dev_logs/manual_validation_v5.0.2.md`.
 
 ## Version 5.0.1
 2026-06-30

@@ -1,6 +1,8 @@
-# Google AI Canvas Exporter
+# Google AI Canvas Exporter v5.0.2
 
-One-click export of Google AI Search mode interactive canvas widgets — simulations, data visualizations, 3D scenes, and physics sandboxes — as fully self-contained offline HTML files. The script automatically detects Widget Shell V2 content inside Google's sandboxed `scf.usercontent.goog` iframes, strips sandbox/CSP restrictions, extracts the WidgetHelpers framework and simulation logic along with CDN dependencies (D3, Observable Plot, Three.js, Matter.js, KaTeX, anime.js), eliminates the "Ghost UI" duplication bug, injects fallback fonts, and reconstructs a clean standalone document with dark/light mode toggle and full-viewport sizing.
+Export complete Google Search AI Mode conversations as clean Markdown and interactive canvas widgets as self-contained offline HTML. v5.0.2 detects virtualized conversation turns, hydrates older turns when the export panel opens, maps inline citations to their real source metadata, and keeps the established v4 canvas reconstruction pipeline intact.
+
+The userscript is deliberately fail-closed. It may be installed on broad `google.com/search` URL patterns for userscript-manager compatibility, but it creates no FAB, badge, panel, styles, export action, or long-running observer on an ordinary Search page. Empty AI Mode home also remains inactive. UI appears only after the current route contains either a complete prompt/response turn or a successfully decoded WidgetHelpers canvas.
 
 ## Background and Motivation
 
@@ -31,10 +33,19 @@ google.com/search (parent page — user sees the canvas here)
 
 ### Detection
 
-1. `MutationObserver` + polling watches for `<iframe>` elements with `src` containing `scf.usercontent.goog`
-2. For each canvas iframe, `TreeWalker` searches the surrounding DOM for `<!--TgQPHd|…-->` comment nodes
-3. `JSON.parse()` decodes the comment's JSON payload (unicode escapes like `\u003c` → `<`)
-4. `findHTMLString()` recursively locates the widget HTML string (identified by `WidgetHelpers` or WH API markers)
+1. A strict runtime route/evidence gate distinguishes ordinary Search, empty AI Mode home, real conversation threads, and decoded canvases.
+2. A route-scoped observer inspects only relevant added nodes and coalesces discovery into debounced idle work.
+3. Every `.CKgc1d` prompt/response pair is cached as a detached snapshot, so Google can unmount its DOM without losing the turn.
+4. For each canvas iframe, a `TreeWalker` searches the surrounding DOM for `<!--TgQPHd|…-->` comments and recursively locates WidgetHelpers HTML.
+
+### Conversation Markdown
+
+- Prompts come from `.ilZyRc.R7mRQb`; responses come only from `[data-xid="VpUvz"]` / `[jsname="KFl8ub"]`.
+- Opening the panel starts a bounded top-to-bottom hydration pass. It advances by about 75% of the viewport, waits for DOM quiet, caches newly mounted turns, stops after two stable bottom passes or the 30-second/200-step cap, and restores the original scroll position.
+- Google role headings, paragraph divs, nested lists, tables, fenced/inline code, blockquotes, thematic breaks, and hard breaks are converted to Markdown.
+- `.WBgIic` citation UUIDs are resolved through hidden `TgQPHd` metadata. Each cited response gets inline numbered links and one deduplicated `### References` block.
+- Share/feedback controls, source carousels, policy UI, dialogs, sidebars, canvas DOM, favicons, thumbnails, and empty list sentinels are excluded.
+- YAML string values are quoted, and frontmatter reports the actual hydrated turn count and exporter version.
 
 ### Extraction Pipeline
 
@@ -49,14 +60,14 @@ google.com/search (parent page — user sees the canvas here)
 
 ## Usage
 
-1. Open a Google Search result that contains an AI-generated interactive canvas widget (AI Mode / AI Overview)
-2. The widget renders inside an iframe — the userscript runs on the google.com page itself
-3. A **floating action button (FAB)** appears in the bottom-right corner with a badge showing the count of detected canvases
-4. Click the FAB to open the **Export Panel**
-5. Review all detected canvases — each shows its title, type badge, and an editable filename
-6. Toggle checkboxes to select which canvases to export (default: all selected)
-7. Configure settings: dark/light mode, full viewport, metadata embedding
-8. Click **Export Selected** — all checked canvases are downloaded as self-contained `.html` files
+1. Open a real Google AI Mode conversation or a Search result containing an AI-generated interactive canvas.
+2. Wait for the bottom-right **FAB** to appear after exportable evidence is verified. No FAB on ordinary Search or empty AI Mode home is expected behavior.
+3. Read the badge as the canvas count when canvases exist, otherwise as the cached conversation-turn count. The green dot means a complete conversation snapshot exists.
+4. Click the FAB. Conversation hydration starts automatically and the panel reports current turn count and progress.
+5. Review the Markdown preview, title, filename, dates/frontmatter settings, canvases, filenames, theme, viewport, and metadata settings.
+6. Choose **Export All**, **Conversation Only**, or **Canvases Only**. Conversation export waits for the active hydration pass; batch downloads remain staggered.
+
+If the hydration safety cap is reached, every cached turn remains exportable and the panel/result is explicitly labeled partial.
 
 The exported files work completely offline (fonts require initial internet for first load, or are embedded via `@font-face` if the widget included them). Open any export in a browser to interact with the simulation exactly as it appeared on Google.
 
@@ -69,6 +80,8 @@ The exported files work completely offline (fonts require initial internet for f
 | Full viewport height | On | Sets `#resize-target` to full viewport for standalone use |
 | Embed metadata | On | Adds an HTML comment header with canvas title, source URL, and export date |
 | Batch export | All selected | Checkbox per canvas; "Select All / Deselect All" toggle; staggered downloads |
+
+Conversation filenames use `{Title}_{WEEKDAY}_{MMDDYYYY}_{HHMMSS}-{AM|PM}-{TZ}.md`.
 
 ## Supported Widget APIs
 
@@ -86,5 +99,19 @@ The script detects and correctly handles all six WidgetHelpers entry points:
 ## Requirements
 
 - [Tampermonkey](https://www.tampermonkey.net/) or compatible userscript manager (Violentmonkey, Greasemonkey)
-- Works on Chrome, Firefox, Edge, Opera, Safari, Brave
+- Intended for current Chrome/Chromium and Firefox userscript managers. Fixture automation is browser-independent; live validation still depends on an authenticated Google AI Mode account and the current Google DOM.
 - No `@grant` permissions required — runs with `@grant none`
+
+## Development and Validation
+
+The distributed userscript remains dependency-free. Repository tests use `jsdom` only as a development dependency:
+
+```powershell
+npm ci
+npm test
+node test/validate-markdown.mjs
+node --check userscript/Google_AI_Canvas_Exporter.user.js
+git diff --check
+```
+
+`test/validate-markdown.mjs` executes the production userscript's test API against both saved real-page fixtures and requires exactly five ordered turns from each. `test/exporter.test.mjs` covers URL gates, empty-home behavior, virtualized replacement, scroll hydration/restoration, golden Markdown/citations, FAB state, observer coalescing, and canvas reconstruction invariants.

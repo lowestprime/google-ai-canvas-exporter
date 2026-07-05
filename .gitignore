@@ -7,3 +7,4 @@ desktop.ini
 *.swp
 *.tmp
 *.bak
+node_modules/
