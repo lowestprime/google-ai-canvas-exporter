@@ -1,12 +1,105 @@
 ---
-title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.3"
-date: 2026-04-05
+title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.9"
+date: 2026-09-28
 source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 ---
 
 # Changelog
 
-One-click export of Google AI Search mode interactive canvas widgets (simulations, visualizations, 3D scenes) as fully self-contained offline HTML files. Automatically detects Widget Shell V2 content inside sandboxed scf.usercontent.goog iframes, strips Google's CSP/sandbox restrictions, extracts WidgetHelpers + simulation logic + CDN dependencies (D3, Plot, Three.js, Matter.js, KaTeX, anime.js), eliminates the "Ghost UI" duplication bug, injects fallback fonts, and reconstructs a clean standalone document with dark/light mode toggle and full-viewport sizing.
+## Version 5.0.9
+2026-09-28
+
+The user-supplied 16-turn, code-heavy v5.0.8 export exposed the outstanding [Greasy Fork formatting report](https://greasyfork.org/en/scripts/572688-google-ai-canvas-exporter/discussions/339322#comment-669160): all 53 inline numeric citations were attached to preceding text, Google's caution label appeared 57 times, code languages were outside their fences, and some current heading wrappers were plain text. A separate flight-delay thread inherited an excessively long first-prompt filename.
+
+| Change | Why it matters |
+|---|---|
+| Readable long-thread filenames | Condense instruction-like titles to bounded topic words and parenthesized acronyms, retaining the timestamp and editable full title. Short user titles are unchanged. |
+| Citation and emphasis boundaries | Separate adjacent citation links from prose and each other; avoid invalid nested bold/italic delimiters in response cards. |
+| Current Google headings and code widgets | Convert `[role="heading"][aria-level]` wrappers; place the code widget's language on its fence and omit Google's caution/copy controls. Use a longer fence when code contains backticks, and recognize matching fences in both normalization and the safe preview, including list-contained code. |
+| Regression coverage | 31 automated tests pass, including a source-structure fixture for a code block inside a list and literal backticks, alongside existing inline/side/legacy canvas and route-gating checks. |
+
+v5.0.8 Firefox Nightly screenshots show two distinct inline canvas cards and downloaded HTML/Markdown files, but the file paths were unavailable during this checkpoint; opened-file interaction was not independently verified in Firefox. v5.0.9 live-browser retests are pending. No grant, network transmission, or production dependency was added. See `dev_logs/manual_validation_v5.0.9.md`.
+
+---
+
+## Version 5.0.8
+2026-09-27
+
+Signed-in Chrome Beta with Tampermonkey Beta in `UserScripts API` mode confirmed that v5.0.7 captured two inline canvases and three conversation segments, but the two canvas cards and Markdown markers were both titled `AI Mode replied:`. The two different HTML files also received the same proposed filename, causing Chrome to append `(1)`.
+
+| Change | Why it matters |
+|---|---|
+| Context-aware inline labels | Prefer an authored HTML title/heading, then a canvas-specific heading after the widget, then a distinct numbered fallback. Google conversation chrome no longer becomes the canvas card title or Markdown marker. The authored HTML document title is preserved. |
+| Collision-safe filenames | Equal titles receive different default card names; a final case-insensitive batch pass also distinguishes user-edited duplicate names without altering already unique choices. |
+| Regression coverage | 29/29 automated tests pass, reproducing generic empty React mounts and duplicate names while retaining mixed, side, legacy, security, and route checks. v5.0.8 live interaction/Firefox results remain pending. |
+
+The source bridge and canvas HTML reconstruction paths are unchanged. Signed-in Chrome Beta showed two correctly named cards and distinct HTML downloads; the user reports both HTML widgets work interactively. Firefox remains unverified. No new grant, network transmission, or production dependency was added. See `dev_logs/manual_validation_v5.0.8.md`.
+
+---
+
+## Version 5.0.7
+2026-09-27
+
+The v5.0.6 HTTPS-shim bridge still captured zero of two visible inline widgets in a signed-in Chrome Beta thread. The exact userscript-manager frame injection state remains to be verified; this release makes that diagnosis observable without exposing widget or conversation source.
+
+| Change | Why it matters |
+|---|---|
+| Narrower frame metadata | Removed the Blob regex `@include` while retaining the exact HTTPS shim `@match`. Tampermonkey documents that regex includes can inject into every frame in UserScripts API Dynamic mode; the shim path needs early HTTPS injection, not a broad Blob match. |
+| Source-free diagnostics | A frame bridge announces startup to the Google page, which also logs the arrival length and source availability of a preload. These distinguish absent/late injection from a rejected source without printing HTML. |
+| Regression coverage | 28 automated tests passed, including metadata scope and existing conversation, inline, right-hand Canvas, legacy, and security checks. Live Chrome Beta later captured two inline canvases; their labels/filenames were defective and opened-file interaction remains unverified. Firefox is untested. |
+
+Tampermonkey's default Chrome mode does not guarantee true `document-start`; its UserScripts API Dynamic mode does. That setting is manager-wide and should be reviewed before changing it. See `dev_logs/manual_validation_v5.0.7.md`. No privileged grant or external persistence was added.
+
+---
+
+## Version 5.0.6
+2026-09-27
+
+Chrome Beta proved that v5.0.5 still reported two visible inline widgets as zero exportable canvases. This release adds a path to capture authored HTML at Google's nested HTTPS shim handoff before its blob navigation, provided the userscript manager injects into that short-lived HTTPS frame early enough. Successful blob-frame injection is no longer required for that path.
+
+| Change | Why it matters |
+|---|---|
+| Pre-navigation inline capture | The shim receives the complete `text/html` body from its trusted parent before `location.replace(blobURL)`. The userscript forwards a bounded, complete authored module document directly to the Google tab. |
+| Verified source association | The Google page accepts an unsolicited source only from a live matching inline frame's outer or indexed nested WindowProxy and an HTTPS `scf.usercontent.goog` origin. A 192-bit nonce-bound challenge also supports extension contexts that report a null message source; unverified previews still do not count. |
+| Empty React mount support | A complete inline document with a substantive module may initially contain an empty `#root`. Inline validation/export now accepts that source; the right-hand Canvas reconstruction path is unchanged. |
+| Actionable diagnostics | The warning identifies nested HTTPS shim access; frame-mode logs distinguish successful shim execution and source forwarding. |
+| Regression coverage | 27 automated tests pass, including trusted shim handoff, spoofed sender/MIME rejection, nested source mapping, nonce-bound null-source replies, pre-DOMContentLoaded receipt, empty-mount HTML export, and side/legacy compatibility. **Live v5.0.6 Chrome Beta still reported zero of two inline canvases after installation and reload**; Firefox is untested. Frame injection timing remains under investigation. |
+
+The script retains `@grant none`, does not upload or externally persist source, and keeps authored CDN dependencies. See `dev_logs/manual_validation_v5.0.6.md` for the actual browser status.
+
+---
+
+## Version 5.0.5
+2026-09-27
+
+Restores a source-capture path for inline AI Mode interactive widgets without changing the right-hand Canvas or legacy WidgetHelpers export paths.
+
+| Change | Why it matters |
+|---|---|
+| Inline sandbox bridge | The supplied flight-delay thread has two rendered `.MngkG` widgets but no top-level `TgQPHd` or hidden side Canvas source. A nonce-, origin-, iframe-, and route-checked tab-local handoff can retrieve authored HTML from the nested blob widget when the userscript manager injects there, directly or through the outer sandbox relay. |
+| Accurate canvas state | An unverified frame still counts as zero exportable canvases; the panel explains inaccessible inline previews. Verified sources appear as distinct cards and update FAB/Markdown even if they arrive after the panel opens. Virtualized remounts reuse their canvas record. |
+| Clean inline HTML | Inline output retains authored module/CSS/CDN dependencies while removing Google's injected sandbox scripts and CSP. Modern side HTML and legacy reconstruction remain on their existing paths. |
+| Cleaner conversation Markdown | Late canvas discovery no longer duplicates a cached turn. The inline-widget AI-generated notice is omitted, and Google heading cards inside lists no longer produce `- ##` syntax. |
+| Regression coverage | 22 automated tests pass, including inline canvas-only/mixed source messages, direct nested-frame handling, two-widget ordering, spoof rejection, remounts, and side/legacy compatibility. Both supplied Desktop DOM captures replay as three segments/two inline frames with no parent-page source. Live Chrome Beta/Firefox export is not yet verified. |
+
+Live Chrome Beta testing subsequently showed that v5.0.5 still failed to capture either inline widget (three conversation segments, zero canvases). The automated bridge tests did not exercise the manager's actual blob-frame injection or the initially empty authored React root. See `dev_logs/manual_validation_v5.0.5.md` for the failure evidence. v5.0.6 adds an HTTPS-shim path and empty-root handling, but the initial live Chrome Beta retest still failed to capture the two widgets.
+
+---
+
+## Version 5.0.4
+2026-09-25
+
+Restores canvas-only and mixed chat/canvas export for the current right-hand AI Mode Canvas UI.
+
+- The new live DOM has an `iframe.lQ27pc` preview but no legacy WidgetHelpers `TgQPHd` comment. The authored HTML is in a hidden `[data-xid="mnldjf"]` code surface beside the preview. Verified modern HTML now registers as a canvas and exports through a separate source-preserving path; legacy WidgetHelpers reconstruction is unchanged.
+- A sandbox iframe without retrievable source no longer creates a fake `Interactive Canvas 1` placeholder or a phantom canvas count. FAB, composition, and export cards use verified registry records, and ordinary Search remains off-target.
+- A targeted observer discovers the side panel without broad Markdown work; source revisions update in-memory HTML and an invalid revision withdraws canvas exportability. Route changes clear canvas state.
+- Markdown removes the current `Shared / 0 files` attachment card. A related-results citation group uses its primary result inline while retaining all collected URLs in that turn's References block.
+- Added portable canvas-only/mixed/empty-home/unknown-source/revision fixtures, a read-only evidence inspector, and a direct capture replay script. Seventeen automated tests pass; authenticated Chrome/Firefox live validation remains pending. See `dev_logs/manual_validation_v5.0.4.md`.
+
+Modern authored HTML may require its original CDN or API dependencies when opened offline. No runtime dependency, privileged grant, or external conversation persistence was added.
+
+One-click export of Google AI Mode conversations and interactive canvases. Legacy Widget Shell V2 content is reconstructed with WidgetHelpers, Ghost UI exclusion, CDN/font preservation, and theme/viewport controls. Modern authored HTML is preserved without forcing the legacy reconstruction model; externally hosted resources may still need network access.
 
 ---
 
