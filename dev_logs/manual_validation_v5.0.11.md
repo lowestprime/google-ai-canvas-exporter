@@ -1,6 +1,6 @@
 # v5.0.11 manual validation — remembered exporter settings
 
-Status (2026-09-28 PDT): automated checks pass; the supplied ZIP contains v5.0.10 exports, not a v5.0.11 restart replay. Signed-in Chrome Beta v5.0.11 installation/restart results are awaiting user confirmation. Firefox is no longer a live-test target for this change, per the user. The available browser-control surface blocks the Tampermonkey extension page, so it cannot install or inspect the script there.
+Status (2026-09-28 PDT): automated checks pass. The user confirmed in Chrome Beta that Turn dates remains off after a browser restart and a deselected canvas remains deselected only in its original thread. These are user-reported live checks, not independently observed through browser control. The supplied ZIP contains v5.0.10 exports, not a v5.0.11 restart replay. Firefox is no longer a live-test target for this change, per the user. The available browser-control surface blocks the Tampermonkey extension page.
 
 ## Automated evidence
 
@@ -11,6 +11,15 @@ Status (2026-09-28 PDT): automated checks pass; the supplied ZIP contains v5.0.1
 | `node --check userscript/Google_AI_Canvas_Exporter.user.js` | Pass. |
 | `git diff --check` | Pass. |
 | Supplied v5.0.10 ZIP | Ten entries assessed in `archive_validation_v5.0.10_2026-09-28.md`; no entry tests preference retention. |
+
+## User-confirmed Chrome Beta checks
+
+| Check | Result |
+|---|---|
+| Turn dates after restart | User confirmed the setting remains off. |
+| Per-thread canvas selection | User confirmed a deselected canvas stays deselected in its original thread but not in another thread. |
+
+The user did not separately report results for YAML frontmatter, Canvases Only download filtering, late-canvas arrival, generic-title stability, or reopening the exported HTML in this v5.0.11 replay. Automated coverage for the relevant state and download paths is listed above.
 
 ## Exact live replay
 
