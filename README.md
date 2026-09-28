@@ -1,18 +1,18 @@
-# Google AI Canvas Exporter v5.0.10
+# Google AI Canvas Exporter
 
-Export Google Search AI Mode conversations as Markdown and verified canvases as standalone HTML. v5.0.10 retains the HTTPS sandbox handoff for traditional inline widgets, the right-hand Canvas source path, and the v4 WidgetHelpers reconstruction path. It keeps concise defaults for long first-prompt filenames, improves citation and code-widget formatting, recognizes response headings with only `role="heading"`, and removes surplus blank lines at the end of code fences. Automated tests cover Turn dates with code blocks on and off. v5.0.8 captured two distinct inline widgets in the signed-in Chrome Beta flight-delay thread, and the user supplied Firefox Nightly exports showing the same two cards; v5.0.10 still needs its own live-browser retest. See `dev_logs/manual_validation_v5.0.10.md`.
+Export Google Search AI Mode conversations as Markdown and verified canvases as standalone HTML. v5.0.11 remembers exporter checkbox settings across sessions, keeps canvas inclusion specific to each thread, and stabilizes anonymous inline-canvas numbering when source messages arrive out of order. It retains the HTTPS sandbox handoff for traditional inline widgets, the right-hand Canvas source path, and the v4 WidgetHelpers reconstruction path. It keeps concise defaults for long first-prompt filenames, improves citation and code-widget formatting, recognizes response headings with only `role="heading"`, and removes surplus blank lines at the end of code fences. Automated tests cover Turn dates with code blocks on and off.
 
 The userscript is deliberately fail-closed. It may be installed on broad `google.com/search` URL patterns for userscript-manager compatibility, but it creates no FAB, badge, panel, styles, export action, or long-running observer on an ordinary Search page. Empty AI Mode home also remains inactive. UI appears only on an AI Mode route after a complete prompt/response turn or a successfully extracted canvas is verified. A visible sandbox iframe alone is not counted as an exportable canvas.
 
 ## Background and Motivation
 
-Google AI Mode can generate interactive widgets — live simulations, charts, 3D models, and physics demos — inline in a response or in a right-hand Canvas panel. Their previews render inside sandboxed `*.scf.usercontent.goog` iframes, which parent-page JavaScript cannot read directly under the same-origin policy. The right-hand Canvas source is sometimes exposed in the parent page; the supplied September 2026 inline examples are not. If the userscript manager injects early into Google's nested HTTPS sandbox shim, the script forwards authored HTML to the Google tab before the shim navigates to a `blob:` document. A challenge-response from the blob frame remains a fallback where the manager supports it. The Google page accepts source only from a live, matching sandbox frame and `scf.usercontent.goog` origin.
+Google AI Mode can generate interactive widgets — live simulations, charts, 3D models, and physics demos — inline in a response or in a right-hand Canvas panel. Their previews render inside sandboxed `*.scf.usercontent.goog` iframes, which parent-page JavaScript cannot read directly under the same-origin policy. The right-hand Canvas source is sometimes exposed in the parent page; as of September 2026, some inline Canvases are not. If the userscript manager injects early into Google's nested HTTPS sandbox shim, the script forwards authored HTML to the Google tab before the shim navigates to a `blob:` document.
 
-Manually exporting these widgets typically requires a tedious and manual multi-step process: navigating DevTools into nested iframes, decoding entity-encoded `srcdoc` attributes, identifying and removing sandbox-injected CSP `<meta>` tags and message-passing `<script>` blocks, stripping pre-rendered "Ghost UI" DOM elements that cause duplication when the app script rebuilds the interface on load, locating and preserving the correct CDN dependency URL, and manually reconstructing a clean HTML document with the right script ordering.
+Manually exporting these widgets typically requires a tedious and manual multi-step process: navigating DevTools into nested iframes, decoding entity-encoded `srcdoc` attributes, identifying and removing sandbox-injected CSP `<meta>` tags and message-passing `<script>` blocks, stripping pre-rendered "Ghost UI" DOM elements that can cause duplication when the app script rebuilds the interface on load, locating and preserving the correct CDN dependency URL, and manually reconstructing a clean HTML document with the right script ordering.
 
-The userscript handles both the older widget-shell representation and the newer authored-HTML code surface without adding privileged userscript grants.
+The userscript exports both older widget-shell representations and the newer authored-HTML code surfaces without requiring privileged userscript grants.
 
-## How It Works
+## Architecture
 
 Older WidgetHelpers canvases nest content across multiple layers:
 
@@ -61,7 +61,7 @@ For older canvases, the parent-page branch extracts WidgetHelpers HTML from adja
 
 ## Usage
 
-1. Install only v5.0.10 of the userscript and disable earlier versions. Allow the userscript manager to run it in nested `https://*.scf.usercontent.goog/search-sandbox/shim.html*` frames. A Chrome Beta capture succeeded with Tampermonkey's **UserScripts API** setting; changing the manager-wide mode to Dynamic is **not** required by that observation and may affect other scripts. The older Blob regex `@include` remains removed. Open a real Google AI Mode conversation or canvas page (`udm=50`). Ordinary Google Search pages remain inactive even if they contain an iframe.
+1. Install only v5.0.11 of the userscript and disable earlier versions. Allow the userscript manager to run it in nested `https://*.scf.usercontent.goog/search-sandbox/shim.html*` frames. A Chrome Beta capture succeeded with Tampermonkey's **UserScripts API** setting; changing the manager-wide mode to Dynamic is **not** required by that observation and may affect other scripts. The older Blob regex `@include` remains removed. Open a real Google AI Mode conversation or canvas page (`udm=50`). Ordinary Google Search pages remain inactive even if they contain an iframe.
 2. Wait for the bottom-right **FAB** to appear after exportable evidence is verified. No FAB on ordinary Search or empty AI Mode home is expected behavior.
 3. Read the badge as the canvas count when canvases exist, otherwise as the cached conversation-segment count. The green dot means a complete text conversation snapshot exists.
 4. Click the FAB. Conversation hydration starts automatically and the panel reports segment, prompt, text-response, canvas, character, and completion counts.
@@ -70,7 +70,7 @@ For older canvases, the parent-page branch extracts WidgetHelpers HTML from adja
 
 If the hydration safety cap is reached, every cached turn remains exportable and the panel/result is explicitly labeled partial.
 
-Modern side canvases are exported as authored. Inline exports preserve the authored module, CSS, font/CDN references, and responsive layout while removing Google sandbox transport scripts and CSP. The initial React `#root` may be empty; its authored module populates it when the export opens. Legacy canvases use the existing reconstruction pipeline. Exports are standalone files, but CDN-hosted scripts, fonts, images, and API calls in the authored canvas still require network access unless already cached or embedded. Open exported HTML only if you trust the canvas code; local HTML retains its JavaScript behavior. If the manager cannot inject into the nested HTTPS shim early enough, inline export remains unavailable; the panel reports that limitation and does not create a fake download. The script logs source-free `bridge-ready` and `preload` signals on the Google page to distinguish injection from capture failures; see `dev_logs/manual_validation_v5.0.10.md`.
+Modern side canvases are exported as authored. Inline exports preserve the authored module, CSS, font/CDN references, and responsive layout while removing Google sandbox transport scripts and CSP. The initial React `#root` may be empty; its authored module populates it when the export opens. Legacy canvases use the existing reconstruction pipeline. Exports are standalone files, but CDN-hosted scripts, fonts, images, and API calls in the authored canvas still require network access unless already cached or embedded. Open exported HTML only if you trust the canvas code; local HTML retains its JavaScript behavior. If the manager cannot inject into the nested HTTPS shim early enough, inline export remains unavailable; the panel reports that limitation and does not create a fake download. The script logs source-free `bridge-ready` and `preload` signals on the Google page to distinguish injection from capture failures.
 
 ## Export Options
 
@@ -80,9 +80,11 @@ Modern side canvases are exported as authored. Inline exports preserve the autho
 | Dark mode | On | Legacy WidgetHelpers only: optional light-mode CSS variable override; modern HTML keeps its authored theme |
 | Full viewport height | On | Legacy WidgetHelpers only: sizes `#resize-target`; modern HTML keeps its authored layout |
 | Embed metadata | On | Adds an HTML comment header with canvas title, source URL, and export date |
-| Batch export | All selected | Checkbox per canvas; "Select All / Deselect All" toggle; staggered downloads |
+| Batch export | All selected | Checkbox per canvas; "Select All / Deselect All" toggle; both Export All and Canvases Only honor unchecked cards; staggered downloads |
 
 Conversation filenames use `{Short_Title}_{WEEKDAY}_{MMDDYYYY}_{HHMMSS}-{AM|PM}-{TZ}.md`. Short titles remain as entered; long instruction-like titles use up to five topic words, preserve up to four parenthesized acronyms, and cap the descriptive stem at 60 characters. Filenames remain editable.
+
+The six general checkboxes—conversation inclusion, YAML frontmatter, Turn dates, Dark mode, Full viewport, and Embed metadata—are saved immediately when changed and reused for later threads. Another already-open tab picks up a change the next time its panel opens. Canvas-card selections and Select/Deselect Canvases are remembered only for the same thread; a different thread starts with every canvas selected. Thread titles, filenames, source URL, and export date remain per-export and are not stored. The script stores only booleans and short hashed route/canvas identifiers in Google-origin `localStorage`; it never stores conversation or canvas source there. Browser profiles do not share these settings. Private browsing or blocked/cleared site storage cannot preserve them across restarts; when a write is blocked, a warning appears and settings remain in memory only until the page closes.
 
 ## Supported Widget APIs
 
@@ -103,16 +105,8 @@ The script detects and correctly handles all six WidgetHelpers entry points:
 - Intended for current Chrome/Chromium and Firefox userscript managers. Fixture automation is browser-independent; live validation still depends on an authenticated Google AI Mode account and the current Google DOM.
 - No `@grant` permissions required — runs with `@grant none`
 
-## Development and Validation
+## Development and Changelog
 
-The distributed userscript remains dependency-free. Repository tests use `jsdom` only as a development dependency:
-
-```powershell
-npm ci
-npm test
-node test/validate-markdown.mjs
-node --check userscript/Google_AI_Canvas_Exporter.user.js
-git diff --check
-```
-
-`test/validate-markdown.mjs` executes the production userscript's test API against both five-turn saved pages and the Formal Classification mixed-content fixture. `test/exporter.test.mjs` covers route gates, virtualization, Markdown/citations, legacy and modern canvas extraction, canvas-only/mixed panel state, revision updates, and source-failure behavior. When the separately supplied September 2026 captures are available, `node test/validate-modern-evidence.mjs <expanded-dom.html> <canvas-source.html>` checks the exact new UI and compares extracted source with the standalone dashboard. The production userscript has no runtime dependencies.
+1. [Google AI Canvas Exporter Greasy Fork Page](https://greasyfork.org/en/scripts/572688-google-ai-canvas-exporter)
+2. [`lowestprime/google-ai-canvas-exporter` GitHub Repository](https://github.com/lowestprime/google-ai-canvas-exporter)
+3. [`google-ai-canvas-exporter/dev_logs/CHANGELOG.md](https://github.com/lowestprime/google-ai-canvas-exporter/blob/main/dev_logs/CHANGELOG.md)
