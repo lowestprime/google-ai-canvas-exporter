@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name              Google AI Canvas Exporter
-// @description       Export Google AI Search mode conversations as clean Markdown and interactive canvas widgets as self-contained offline HTML. Conversation export captures all user/AI turns with inline citations, compact reference blocks, YAML frontmatter, and smart filenames. Canvas export detects Widget Shell V2 in sandboxed scf.usercontent.goog iframes, strips CSP/sandbox artifacts, extracts WidgetHelpers + CDN deps, and supports batch download via a unified floating export panel.
+// @description       Export verified Google AI Mode conversations and inline, side, or legacy canvases as Markdown and HTML. Frame source is accepted only through a route-scoped local bridge.
 // @author            lowestprime x Claude Opus 4.6 Max Agent
 // @namespace         https://greasyfork.org/en/users/823161-lowestprime
 // @license           MIT
-// @version           5.0.3
+// @version           5.0.9
 // @match             *://www.google.com/search*
 // @match             *://*.google.com/search*
+// @match             https://*.scf.usercontent.goog/search-sandbox/shim.html*
 // @grant             none
-// @run-at            document-idle
+// @run-at            document-start
 // @icon              data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22bg%22%20x1%3D%226%22%20y1%3D%224%22%20x2%3D%2258%22%20y2%3D%2260%22%20gradientUnits%3D%22userSpaceOnUse%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%235BA3FF%22%2F%3E%3Cstop%20offset%3D%220.55%22%20stop-color%3D%22%235292F9%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%237C4DFF%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22panel%22%20x1%3D%2212%22%20y1%3D%2215%22%20x2%3D%2238%22%20y2%3D%2239%22%20gradientUnits%3D%22userSpaceOnUse%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23182742%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%230A1220%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23bg%29%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%2210%22%20width%3D%2228%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23091221%22%20fill-opacity%3D%22.24%22%20stroke%3D%22%23FFF%22%20stroke-opacity%3D%22.12%22%20stroke-width%3D%221.4%22%2F%3E%3Crect%20x%3D%2210%22%20y%3D%2215%22%20width%3D%2228%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22url%28%23panel%29%22%20stroke%3D%22%23FFF%22%20stroke-opacity%3D%22.22%22%20stroke-width%3D%221.6%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%2219%22%20width%3D%2218%22%20height%3D%223%22%20rx%3D%221.5%22%20fill%3D%22%23FFF%22%20fill-opacity%3D%22.14%22%2F%3E%3Cpath%20d%3D%22M15%2033.5%2020.2%2028.8%2024.7%2031.7%2030.3%2024.8%2034%2027.2%22%20fill%3D%22none%22%20stroke%3D%22%2374F3D6%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Cpath%20d%3D%22M36%2031.5h7.5%22%20fill%3D%22none%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%223.2%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22m40.7%2027.2%205.8%204.3-5.8%204.3%22%20fill%3D%22none%22%20stroke%3D%22%23FFF%22%20stroke-width%3D%223.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Cpath%20d%3D%22M44%2014h11c2.2%200%204%201.8%204%204v24c0%202.2-1.8%204-4%204H44c-2.2%200-4-1.8-4-4V18c0-2.2%201.8-4%204-4Z%22%20fill%3D%22%23FFF%22%2F%3E%3Cpath%20d%3D%22M52%2014v6c0%201.7%201.3%203%203%203h4%22%20fill%3D%22none%22%20stroke%3D%22%23D8E6FF%22%20stroke-width%3D%222.2%22%2F%3E%3Cpath%20d%3D%22M45.8%2028.2h8m-8%205h8m-8%205h4.8%22%20fill%3D%22none%22%20stroke%3D%22%235292F9%22%20stroke-width%3D%222.3%22%20stroke-linecap%3D%22round%22%2F%3E%3C%2Fsvg%3E
 // ==/UserScript==
 
@@ -16,7 +17,143 @@
     'use strict';
 
     const TAG = '[GCE]';
-    const VERSION = '5.0.3';
+    const VERSION = '5.0.9';
+    const INLINE_MESSAGE = 'gce-inline-canvas-v1';
+    const MAX_INLINE_HTML = 5_000_000;
+
+    function isScfOrigin(origin) {
+        try {
+            const url = new URL(origin);
+            return url.protocol === 'https:' && url.hostname.endsWith('.scf.usercontent.goog');
+        } catch (_) { return false; }
+    }
+
+    // This branch runs inside Google's sandbox, never in an ordinary web page.
+    // Blob documents inherit their creator's scf.usercontent.goog origin. The
+    // two frame hops keep source local to the tab and preserve @grant none.
+    function isSandboxFrameURL(href = location.href) {
+        try {
+            const url = new URL(href.startsWith('blob:') ? href.slice(5) : href);
+            return url.protocol === 'https:' && url.hostname.endsWith('.scf.usercontent.goog') &&
+                (href.startsWith('blob:') || url.pathname === '/search-sandbox/shim.html');
+        } catch (_) { return false; }
+    }
+
+    function installSandboxFrameBridge() {
+        if (window.parent === window) return;
+        const pending = new Map();
+        const pendingTop = new Map();
+        let authoredHTML = '';
+        const shim = !location.href.startsWith('blob:');
+        const trustedParent = shim ? new URL(location.href).searchParams.get('origin') : '';
+        console.log(TAG, `v${VERSION} sandbox bridge: ${shim ? 'shim' : 'blob'} on ${location.hostname}`);
+        // A source-free signal makes actual frame injection distinguishable
+        // from a manager merely listing metadata matches in its toolbar.
+        window.top.postMessage({ channel: INLINE_MESSAGE, kind: 'bridge-ready',
+            phase: shim ? 'shim' : 'blob' }, 'https://www.google.com');
+        // The HTTPS shim sometimes creates its HTML blob before navigating.
+        // A subsequent blob-document injection can also serialize its own DOM.
+        const createObjectURL = URL.createObjectURL;
+        if (createObjectURL) URL.createObjectURL = function (blob) {
+            const result = createObjectURL.call(this, blob);
+            if (blob?.type?.includes('html') && blob.size <= MAX_INLINE_HTML) {
+                blob.text().then(html => {
+                    if (/<!doctype\s+html/i.test(html) && /<\/html\s*>/i.test(html)) authoredHTML = html;
+                }).catch(() => {});
+            }
+            return result;
+        };
+        const sourceHTML = () => {
+            if (authoredHTML && /<script\b[^>]*type\s*=\s*["']module["']/i.test(authoredHTML))
+                return authoredHTML;
+            if (!document.body || !document.documentElement) return '';
+            const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+            return html.length <= MAX_INLINE_HTML && document.querySelector('script[type="module"]') ? html : '';
+        };
+        const childFrame = () => document.querySelector('iframe[src*="scf.usercontent.goog"], iframe[src^="blob:"]');
+        const reply = (request, html) => {
+            if (!html || html.length > MAX_INLINE_HTML) return;
+            request.sender.postMessage({ channel: INLINE_MESSAGE, kind: 'source', nonce: request.nonce,
+                route: request.route, html }, request.senderOrigin);
+        };
+        window.addEventListener('message', event => {
+            const data = event.data;
+            // Google's HTTPS shim receives the authored HTML in a message, then
+            // replaces itself with a blob document. The userscript manager may
+            // not inject into blob: frames, so capture the verified payload at
+            // this earlier handoff. The inner shim sends it directly to Google;
+            // the outer shim's transport HTML has no authored module and fails
+            // the structural check. No source is sent off-tab or persisted.
+            if (shim && event.source === window.parent && event.origin === trustedParent &&
+                typeof data?.mimeType === 'string' && data.mimeType.toLowerCase().startsWith('text/html')) {
+                const body = data.body;
+                const rawHTML = typeof body === 'string' ? body :
+                    Object.prototype.toString.call(body) === '[object ArrayBuffer]' &&
+                        body.byteLength <= MAX_INLINE_HTML ?
+                        new TextDecoder().decode(body) : '';
+                const html = /<!doctype\s+html/i.test(rawHTML) ? rawHTML :
+                    `<!DOCTYPE html>\n${rawHTML}`;
+                if (html.length >= 300 && html.length <= MAX_INLINE_HTML &&
+                    /<html(?:\s|>)/i.test(rawHTML) && /<\/html\s*>\s*$/i.test(rawHTML) &&
+                    /<script\b[^>]*type\s*=\s*["']?module\b/i.test(rawHTML)) {
+                    authoredHTML = html;
+                    window.top.postMessage({ channel: INLINE_MESSAGE, kind: 'preload', html },
+                        'https://www.google.com');
+                    for (const [nonce, route] of pendingTop) {
+                        window.top.postMessage({ channel: INLINE_MESSAGE, kind: 'source', nonce, route, html },
+                            'https://www.google.com');
+                        pendingTop.delete(nonce);
+                    }
+                    console.log(TAG, `Inline source forwarded from ${location.hostname}`);
+                }
+            }
+            if (!data || data.channel !== INLINE_MESSAGE || typeof data.nonce !== 'string' ||
+                data.nonce.length < 20 || data.nonce.length > 100 || typeof data.route !== 'string') return;
+            const fromParent = event.source === window.parent &&
+                (event.origin === 'https://www.google.com' || isScfOrigin(event.origin));
+            const fromGoogleTop = window.top !== window.parent && event.source === window.top &&
+                event.origin === 'https://www.google.com';
+            const fromExtensionWorld = event.source === null &&
+                (event.origin === 'https://www.google.com' || event.origin === trustedParent);
+            if (data.kind === 'probe' && (fromParent || fromGoogleTop || fromExtensionWorld)) {
+                const request = { nonce: data.nonce, route: data.route,
+                    sender: event.source || window.top,
+                    senderOrigin: event.source ? event.origin : 'https://www.google.com' };
+                if (shim) {
+                    pendingTop.set(data.nonce, data.route);
+                    setTimeout(() => pendingTop.delete(data.nonce), 15000);
+                }
+                const ownHTML = sourceHTML();
+                if (ownHTML) {
+                    reply(request, ownHTML);
+                    return;
+                }
+                const child = childFrame();
+                if (child?.contentWindow) {
+                    pending.set(data.nonce, request);
+                    const send = () => child.contentWindow?.postMessage(data, new URL(child.src).origin);
+                    send();
+                    child.addEventListener('load', send, { once: true });
+                    setTimeout(() => pending.delete(data.nonce), 15000);
+                } else if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', () => reply(request, sourceHTML()), { once: true });
+                }
+            } else if (data.kind === 'source' && typeof data.html === 'string') {
+                const request = pending.get(data.nonce);
+                const child = childFrame();
+                if (!request || !child || event.source !== child.contentWindow ||
+                    event.origin !== new URL(child.src).origin || data.route !== request.route) return;
+                pending.delete(data.nonce);
+                reply(request, data.html);
+            }
+        });
+    }
+
+    if (isSandboxFrameURL()) {
+        installSandboxFrameBridge();
+        return;
+    }
+    if (!/^https:\/\/[^/]+\.google\.com\/search(?:[?#]|$)/.test(location.href) || window.top !== window) return;
     const WH_APIS = [
         'WH.createApp', 'WH.initCanvas', 'WH.initD3',
         'WH.initPlot', 'WH.initThree', 'WH.initPhysics'
@@ -41,14 +178,20 @@
         response: '[data-xid="VpUvz"], [jsname="KFl8ub"].mZJni',
         citation: '.WBgIic',
         canvasIframe: 'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc',
+        modernCanvasSource: '[data-xid="mnldjf"]',
         sourceAside: '[data-xid="aim-aside-initial-corroboration-container"], .N6Axvb',
         probe: '[jsname="coFSxe"], [jsname="guest_container_"], .CKgc1d, ' +
             '[data-xid="pJN44d"], .AsFDjf.Vaqf8d, .Eltaeb, ' +
-            'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc'
+            'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc, [data-xid="mnldjf"]'
     });
     const TEST_MODE = globalThis.__GCE_TEST_MODE__ === true;
     let taggedIframes = new WeakSet();
     let canvasByIframe = new WeakMap();
+    let canvasBySource = new WeakMap();
+    let inlineProbeAt = new WeakMap();
+    let inlineProbeAttempts = new WeakMap();
+    const inlineChallenges = new Map();
+    let watchedCanvasSources = new WeakSet();
     const registry = [];
     const turnCache = new Map();
     const snapshotFingerprints = new Map();
@@ -66,6 +209,8 @@
     let nextTurnOrder = 0;
     let workTimer = null;
     let observer = null;
+    let canvasObserver = null;
+    let sourceObserver = null;
     let observerRoot = null;
     let discoveryDeadline = 0;
     let routeTimer = null;
@@ -159,10 +304,58 @@
         return safe.replace(/ /g, '_') + '_' + generateTimestamp();
     }
 
+    function defaultCanvasFilename(canvas, index) {
+        const base = makeFilename(canvas.title);
+        const stem = title => String(title).replace(/[^a-zA-Z0-9 _-]/g, '').trim()
+            .replace(/ /g, '_').toLowerCase();
+        const previous = registry.slice(0, index).filter(item =>
+            stem(item.title) === stem(canvas.title)).length;
+        return previous ? `${base}_${previous + 1}` : base;
+    }
+
+    function dedupeExportFilenames(jobs) {
+        const used = new Set();
+        for (const job of jobs) {
+            const name = job.filename;
+            const dot = name.lastIndexOf('.');
+            const base = dot > 0 ? name.slice(0, dot) : name;
+            const ext = dot > 0 ? name.slice(dot) : '';
+            let candidate = name;
+            let ordinal = 2;
+            while (used.has(candidate.toLowerCase())) candidate = `${base}_${ordinal++}${ext}`;
+            job.filename = candidate;
+            used.add(candidate.toLowerCase());
+        }
+        return jobs;
+    }
+
     function makeMarkdownFilename(title, when = new Date()) {
         const safe = String(title || 'AI_Mode_Thread')
-            .replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'AI_Mode_Thread';
-        const underscored = safe.replace(/ /g, '_');
+            .replace(/[^a-zA-Z0-9 _-]/g, ' ').replace(/\s+/g, ' ').trim() || 'AI_Mode_Thread';
+        let stem = safe.replace(/[ -]+/g, '_');
+        if (stem.length > 64) {
+            const filler = new Set(('please rigorously compare generate absolute optimal interactive ' +
+                'aimode canvas depicting specific recent historical prevalence incidence frequency ' +
+                'domestic associated with cross country specifically occurring in respectively ' +
+                'accurately comprehensively possible as of today the and vs between for ' +
+                'provide analyze update further solution').split(' '));
+            const acronyms = [...new Set([...String(title).matchAll(/\(([A-Z]{2,5})\)/g)]
+                .map(match => match[1]))].slice(0, 4);
+            const topics = [...new Set((safe.match(/[A-Za-z0-9]+/g) || [])
+                .filter(word => !filler.has(word.toLowerCase()))
+                .map(word => /[a-z][A-Z]/.test(word) ? word :
+                    word[0].toUpperCase() + word.slice(1).toLowerCase()))];
+            const selected = [];
+            for (const word of topics) {
+                if (selected.length === 5) break;
+                if ([...selected, word, ...acronyms].join('_').length <= 60) selected.push(word);
+            }
+            for (const acronym of acronyms) {
+                if (!selected.includes(acronym) && [...selected, acronym].join('_').length <= 60)
+                    selected.push(acronym);
+            }
+            stem = selected.join('_') || 'AI_Mode_Thread';
+        }
         const p = (n) => String(n).padStart(2, '0');
         const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
         const weekday = days[when.getDay()];
@@ -172,7 +365,7 @@
         const ampm = h >= 12 ? 'PM' : 'AM';
         const tz = Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
             .formatToParts(when).find(x => x.type === 'timeZoneName')?.value || 'UTC';
-        return `${underscored}_${weekday}_${date}_${time}-${ampm}-${tz}.md`;
+        return `${stem}_${weekday}_${date}_${time}-${ampm}-${tz}.md`;
     }
 
     function detectType(html) {
@@ -573,7 +766,11 @@
                 return map.get(k);
             },
             addUUID(uuid) {
-                return (citationMap.get(uuid) || []).map(url => ({ num: this.add(url), url })).filter(x => x.num);
+                const sources = (citationMap.get(uuid) || [])
+                    .map(url => ({ num: this.add(url), url })).filter(x => x.num);
+                // A related-results marker may represent dozens of sources. Cite
+                // its primary result inline and retain the full group below.
+                return sources.slice(0, 1);
             },
             addMarker(marker) {
                 const tokens = [...marker.querySelectorAll('button[data-icl-uuid]')]
@@ -596,13 +793,23 @@
         return `[${num}](${href})`;
     }
 
+    function fencedCode(body, language = '') {
+        const code = String(body || '').replace(/\r\n?/g, '\n');
+        let longest = 0;
+        for (const match of code.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
+        const fence = '`'.repeat(Math.max(3, longest + 1));
+        const lang = String(language || '').trim().match(/^[a-zA-Z0-9_+.-]+$/)?.[0] || '';
+        return `\n${fence}${lang}\n${code}${code.endsWith('\n') ? '' : '\n'}${fence}\n\n`;
+    }
+
     function prepareCloneForMarkdown(root) {
         const clone = root.cloneNode(true);
         clone.querySelectorAll(
             '[data-xid="Gd7Hsc"], [data-xid="aim-aside-initial-corroboration-container"], ' +
-            '.N6Axvb, .JslKxc, .Z99Mic, [data-tpcrb-host], .kWjn6e, ' +
+            '.N6Axvb, .JslKxc, .Z99Mic, .srOP7c, [data-tpcrb-host], .kWjn6e, ' +
             '[data-xid="m3fCN"], .ofHStc, .qmNpEc, ' +
             '.emqXtf, iframe, [data-inline-canvas], .Lucn7c, .ZAjsj, ' +
+            '.Rpz2Dd[data-sfc-root="ep"], ' +
             '[role="dialog"], [aria-modal="true"], aside, nav, form'
         ).forEach(n => n.remove());
         clone.querySelectorAll('button:not([data-icl-uuid]), input, select, textarea, img, picture, source').forEach(n => n.remove());
@@ -615,6 +822,16 @@
 
         function escInline(s) {
             return String(s ?? '').replace(/[`*_[\]]/g, m => '\\' + m);
+        }
+
+        function joinMarkdownChildren(nodes, ctx) {
+            let result = '';
+            for (const node of nodes) {
+                const part = walk(node, ctx);
+                if (/^\[\d+\]\(https?:\/\//.test(part) && result && !/\s$/.test(result)) result += ' ';
+                result += part;
+            }
+            return result;
         }
 
         function walk(node, ctx = { inPre: false, inTable: false, listDepth: 0 }) {
@@ -637,7 +854,13 @@
             if (el.closest('[data-tpcrb-host], .kWjn6e')) return '';
             if (tag === 'img') return shouldDropImage(el) ? '' : '';
 
-            const children = () => Array.from(el.childNodes).map(c => walk(c, ctx)).join('');
+            const children = () => joinMarkdownChildren(el.childNodes, ctx);
+
+            if (el.matches('.aiModeUiCodeBlock__Container')) {
+                const code = el.querySelector('pre code, pre');
+                const language = el.querySelector('.a2TNg .GlO4G')?.textContent || '';
+                return code ? fencedCode(code.textContent, language) : '';
+            }
 
             if (tag === 'a') {
                 const href = normUrl(el.getAttribute('href') || '');
@@ -651,8 +874,10 @@
                 return `[${escInline(label)}](${href})`;
             }
 
-            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"], div.ncoeY, div.xM049c.BAlmad')) {
-                const lvl = /^h[1-6]$/.test(tag) ? Number(tag[1]) : 2;
+            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"], div.ncoeY, div.xM049c.BAlmad, [role="heading"][aria-level]')) {
+                const ariaLevel = Number(el.getAttribute('aria-level'));
+                const lvl = /^h[1-6]$/.test(tag) ? Number(tag[1]) :
+                    Number.isInteger(ariaLevel) && ariaLevel >= 2 ? Math.min(6, ariaLevel - 1) : 2;
                 const t = textCompact(children()).replace(/^#{1,6}\s+/, '');
                 return t ? `\n${'#'.repeat(lvl)} ${t}\n\n` : '';
             }
@@ -663,12 +888,12 @@
             if (tag === 'br') return '  \n';
             if (tag === 'hr') return '\n---\n\n';
             if (tag === 'strong' || tag === 'b') {
-                const t = children();
-                return t ? `**${t}**` : '';
+                const t = joinMarkdownChildren(el.childNodes, { ...ctx, inStrong: true });
+                return t ? (ctx.inStrong ? t : `**${t}**`) : '';
             }
             if (tag === 'em' || tag === 'i') {
-                const t = children();
-                return t ? `*${t}*` : '';
+                const t = joinMarkdownChildren(el.childNodes, { ...ctx, inEm: true });
+                return t ? (ctx.inEm ? t : `*${t}*`) : '';
             }
             if (tag === 'code') {
                 if (ctx.inPre) return el.textContent || '';
@@ -678,8 +903,7 @@
             if (tag === 'pre') {
                 const code = el.querySelector('code');
                 const lang = code ? [...code.classList].find(c => c.startsWith('language-'))?.slice(9) || '' : '';
-                const body = (code || el).textContent || '';
-                return `\n\`\`\`${lang}\n${body}\n\`\`\`\n\n`;
+                return fencedCode((code || el).textContent, lang);
             }
             if (tag === 'blockquote') {
                 const inner = children().trim().split('\n').map(l => l.trim() ? `> ${l.trim()}` : '>').join('\n');
@@ -692,15 +916,26 @@
                 let out = ctx.listDepth ? '' : '\n';
                 items.forEach((li, i) => {
                     const bullet = tag === 'ol' ? `${i + 1}. ` : '- ';
-                    const direct = [...li.childNodes]
-                        .filter(child => !(child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)))
-                        .map(child => walk(child, { ...ctx, inTable: false, listDepth: ctx.listDepth + 1 }))
-                        .join('').trim();
+                    const nonListChildren = [...li.childNodes].filter(child =>
+                        !(child.nodeType === Node.ELEMENT_NODE && /^(ul|ol)$/i.test(child.tagName)));
+                    let direct = joinMarkdownChildren(nonListChildren,
+                        { ...ctx, inTable: false, listDepth: ctx.listDepth + 1 }).trim();
                     const nested = [...li.children]
                         .filter(child => /^(ul|ol)$/i.test(child.tagName))
                         .map(child => walk(child, { ...ctx, listDepth: ctx.listDepth + 1 })).join('');
                     if (!direct && !nested.trim()) return;
-                    if (direct) out += `${indent}${bullet}${direct}\n`;
+                    if (direct) {
+                        // Google puts block headings inside list cards. A raw
+                        // "- ## Heading" is parsed as literal text, not a heading.
+                        direct = direct.replace(/^#{1,6}\s+([^\n]+)/, '**$1**');
+                        const [first, ...continuation] = direct.split('\n');
+                        out += `${indent}${bullet}${first}\n`;
+                        const continuationIndent = `${indent}${' '.repeat(bullet.length)}`;
+                        for (const line of continuation) {
+                            if (line.trim()) out += `${continuationIndent}${line}\n`;
+                            else out += '\n';
+                        }
+                    }
                     out += nested;
                 });
                 return out + (ctx.listDepth ? '' : '\n');
@@ -733,25 +968,38 @@
     function normalizeMarkdown(md) {
         const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
         const out = [];
-        let inFence = false;
+        let fence = null;
         let blank = false;
         for (let line of lines) {
-            if (/^\s*```/.test(line)) inFence = !inFence;
-            if (!inFence) {
+            const opening = !fence ? markdownFenceOpen(line) : null;
+            const closing = fence && markdownFenceClose(line, fence);
+            if (!fence && !opening) {
                 const hardBreak = / {2}$/.test(line);
                 line = line.replace(/[ \t]+$/g, hardBreak ? '  ' : '');
                 line = line.replace(/ \+1\b/g, '').replace(/\\_/g, '_');
                 if (/^\s*(?:-|\d+\.)\s*$/.test(line)) line = '';
             }
-            if (!inFence && !line.trim()) {
+            if (!fence && !line.trim()) {
                 if (!blank && out.length) out.push('');
                 blank = true;
                 continue;
             }
             out.push(line);
             blank = false;
+            if (opening) fence = opening;
+            else if (closing) fence = null;
         }
         return out.join('\n').trim();
+    }
+
+    function markdownFenceOpen(line) {
+        const match = String(line).match(/^\s*(`{3,}|~{3,})([^`]*)$/);
+        return match ? { marker: match[1][0], length: match[1].length, info: match[2].trim() } : null;
+    }
+
+    function markdownFenceClose(line, fence) {
+        const match = String(line).match(/^\s*(`{3,}|~{3,})[ \t]*$/);
+        return !!match && match[1][0] === fence.marker && match[1].length >= fence.length;
     }
 
     function formatReferences(source) {
@@ -790,14 +1038,16 @@
         const prompt = extractUserText(segment.promptElement || segmentRoot);
         const timestamp = extractTurnDate(segment.promptElement?.parentElement || segmentRoot);
         const responseText = segment.responseBlocks.map(getResponseFingerprintText).join('\u241f');
-        const canvasRecords = segment.canvasBlocks.map((canvas, index) => {
+        const canvasRecords = segment.canvasBlocks.map((canvas) => {
             const record = getCanvasRecordForIframe(canvas.iframe);
-            return record || { title: `Interactive Canvas ${index + 1}`, type: 'Widget' };
-        });
+            return record;
+        }).filter(Boolean);
         if (!prompt && !responseText && !canvasRecords.length) return null;
         const stable = segmentRoot?.id || segmentRoot?.getAttribute?.('data-ved')
             || segmentRoot?.querySelector?.('[data-ved]')?.getAttribute('data-ved');
-        const id = stable ? `dom:${stable}` : `content:${stringHash(`${prompt}\u241f${timestamp}\u241f${responseText}\u241f${canvasRecords.map(c => c.title).join('|')}`)}`;
+        // Discovery of a previously unknown inline canvas must update, not
+        // duplicate, the already-cached text segment.
+        const id = stable ? `dom:${stable}` : `content:${stringHash(`${prompt}\u241f${timestamp}\u241f${responseText}`)}`;
         const fingerprint = stringHash(`${responseText}\u241f${segmentRoot?.querySelectorAll?.('[data-icl-uuid]').length || 0}\u241f${canvasRecords.map(c => c.title).join('|')}`);
         const prior = turnCache.get(id);
         if (prior && snapshotFingerprints.get(id) === fingerprint) return { ...prior, order };
@@ -808,11 +1058,11 @@
 
         const orderedParts = [
             ...segment.responseBlocks.map(block => ({ type: 'text', key: block, block })),
-            ...segment.canvasBlocks.map((canvas, index) => ({
+            ...segment.canvasBlocks.map((canvas) => ({
                 type: 'canvas',
                 key: canvas.iframe,
-                record: canvasRecords[index]
-            }))
+                record: getCanvasRecordForIframe(canvas.iframe)
+            })).filter(part => part.record)
         ].sort((a, b) => compareDOMOrder(a.key, b.key));
         const markdownParts = [];
         let hasTextResponse = false;
@@ -895,7 +1145,7 @@
             segmentCount: turns.length,
             promptCount: turns.filter(turn => !!(turn.prompt || turn.user)).length,
             responseCount: turns.filter(turn => turn.hasTextResponse !== false && !!turn.bodyMarkdown).length,
-            canvasCount: turns.reduce((count, turn) => count + (turn.canvasTitles?.length || 0), 0)
+            canvasCount: registry.length
         };
     }
 
@@ -1030,11 +1280,267 @@
         return 'Interactive_Simulation';
     }
 
+    // New Canvas UI keeps the editable HTML in a hidden sibling of the sandbox
+    // preview. The sandbox iframe itself is cross-origin and has no readable srcdoc.
+    function extractModernCanvasHTML(sourceNode) {
+        if (!sourceNode?.matches?.(SELECTORS.modernCanvasSource) ||
+            !sourceNode.closest('[aria-label="Canvas preview"]')) return null;
+        const raw = sourceNode.textContent || '';
+        const start = raw.search(/<!doctype\s+html\s*>/i);
+        if (start < 0 || raw.length - start > 5_000_000) return null;
+        const html = raw.slice(start).trim();
+        if (html.length < 200 || !/<html(?:\s|>)/i.test(html) || !/<\/html\s*>\s*$/i.test(html)) return null;
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        if (!doc.body || textCompact(doc.body.textContent).length < 30 ||
+            /^(?:Security Content Container|Generative Widget)$/i.test(doc.title)) return null;
+        return html;
+    }
+
+    function isInlineCanvasIframe(iframe) {
+        return !!(iframe?.matches?.(SELECTORS.canvasIframe) && iframe.closest('.MngkG') &&
+            !iframe.closest('[aria-label="Canvas preview"]') &&
+            (getConversationHost()?.contains(iframe) || iframe.closest(SELECTORS.segmentRoot)));
+    }
+
+    function validateInlineCanvasHTML(html) {
+        if (typeof html !== 'string' || html.length < 300 || html.length > MAX_INLINE_HTML ||
+            !/<!doctype\s+html/i.test(html) || !/<\/html\s*>\s*$/i.test(html)) return false;
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        // The shim's original payload precedes React rendering: its #root can
+        // legitimately be empty. Requiring visible body text rejects precisely
+        // the source we need to export; the authored module is the evidence.
+        return !!(doc.body && doc.querySelector('html head') &&
+            [...doc.querySelectorAll('script[type="module"]')].some(script => script.textContent.length > 100));
+    }
+
+    function inlineCanvasTitle(iframe, html, fallback = '') {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const generic = value => /^(?:AI Mode replied:?|Generated Interactive Widget|Interactive[_ ]Simulation)$/i
+            .test(textCompact(value));
+        const title = extractTitle(doc);
+        if (title && !generic(title)) return title;
+        const heading = textCompact(doc.querySelector('h1, [role="heading"]')?.textContent).slice(0, 90);
+        if (heading && !generic(heading)) return heading;
+        const root = iframe.closest(SELECTORS.segmentRoot);
+        const nearby = [...(root?.querySelectorAll('h1, h2, h3, [role="heading"]') || [])]
+            .filter(el => iframe.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .map(el => textCompact(el.textContent).slice(0, 90))
+            .find(label => /\bcanvas\b/i.test(label) && !/^AI Mode replied:/i.test(label));
+        return nearby || fallback || `Interactive Canvas ${registry.filter(item => item.format === 'inline').length + 1}`;
+    }
+
+    function inlineCanvasIdentity(iframe) {
+        const segment = iframe.closest(SELECTORS.segmentRoot);
+        if (!segment) return '';
+        const stable = segment.id || segment.getAttribute('data-ved') ||
+            segment.querySelector('[data-ved]')?.getAttribute('data-ved');
+        const prompt = extractUserText(segment);
+        const timestamp = extractTurnDate(segment);
+        const response = segment.querySelector(SELECTORS.response);
+        const responseText = response ? getResponseFingerprintText(response) : '';
+        const ordinal = [...segment.querySelectorAll(SELECTORS.canvasIframe)].indexOf(iframe);
+        return `${stable || stringHash(`${prompt}\u241f${timestamp}\u241f${responseText}`)}:${ordinal}`;
+    }
+
+    function registerInlineCanvasSource(iframe, html) {
+        if (!isConversationRouteCandidate() || !document.contains(iframe) || !isInlineCanvasIframe(iframe) ||
+            !validateInlineCanvasHTML(html)) return null;
+        const identity = inlineCanvasIdentity(iframe);
+        const known = canvasByIframe.get(iframe) || registry.find(record =>
+            record.format === 'inline' && record.identity === identity);
+        const fingerprint = stringHash(html);
+        if (known) {
+            if (known.format !== 'inline') return known;
+            if (known.fingerprint !== fingerprint) {
+                known.widgetHTML = html;
+                known.fingerprint = fingerprint;
+                known.title = inlineCanvasTitle(iframe, html, known.title);
+            }
+            known.iframe = iframe;
+            canvasByIframe.set(iframe, known);
+            return known;
+        }
+        const record = { id: registry.length, widgetHTML: html,
+            title: inlineCanvasTitle(iframe, html), type: 'HTML', format: 'inline',
+            fingerprint, identity, iframe };
+        registry.push(record);
+        canvasByIframe.set(iframe, record);
+        console.log(TAG, `Canvas registered: "${record.title}" [inline HTML]`);
+        return record;
+    }
+
+    function requestInlineCanvasSource(iframe) {
+        if (!isConversationRouteCandidate() || !isInlineCanvasIframe(iframe) ||
+            !document.contains(iframe) || canvasByIframe.has(iframe) || !iframe.contentWindow ||
+            !globalThis.crypto?.getRandomValues || (inlineProbeAttempts.get(iframe) || 0) >= 12) return false;
+        const now = Date.now();
+        if (now - (inlineProbeAt.get(iframe) || 0) < 1500) return false;
+        let origin;
+        try {
+            origin = new URL(iframe.src).origin;
+            if (!origin.endsWith('.scf.usercontent.goog')) return false;
+        } catch (_) { return false; }
+        const nonce = [...crypto.getRandomValues(new Uint8Array(24))]
+            .map(byte => byte.toString(16).padStart(2, '0')).join('');
+        const route = currentRouteKey || deriveRouteKey();
+        const routeTag = stringHash(route);
+        for (const [oldNonce, pending] of inlineChallenges) {
+            if (pending.iframe === iframe) {
+                clearTimeout(pending.timeout);
+                inlineChallenges.delete(oldNonce);
+            }
+        }
+        let innerWindow = null;
+        try { innerWindow = iframe.contentWindow.frames[0] || null; } catch (_) { /* retry through outer frame */ }
+        const timeout = setTimeout(() => inlineChallenges.delete(nonce), 12000);
+        inlineChallenges.set(nonce, { iframe, origin, route, routeTag, innerWindow, timeout });
+        inlineProbeAt.set(iframe, now);
+        inlineProbeAttempts.set(iframe, (inlineProbeAttempts.get(iframe) || 0) + 1);
+        const probe = { channel: INLINE_MESSAGE, kind: 'probe', nonce, route: routeTag };
+        iframe.contentWindow.postMessage(probe, origin);
+        // Cross-origin WindowProxy permits indexed child-frame access, not DOM
+        // reads. The inner origin is opaque to Google, so this probe contains
+        // only random/hashed identifiers; the reply must have an scf origin.
+        innerWindow?.postMessage(probe, '*');
+        return true;
+    }
+
+    function acceptInlineCanvasSource(iframe, html) {
+        const record = registerInlineCanvasSource(iframe, html);
+        if (!record) return false;
+        for (const [nonce, challenge] of inlineChallenges) {
+            if (challenge.iframe === iframe) {
+                clearTimeout(challenge.timeout);
+                inlineChallenges.delete(nonce);
+            }
+        }
+        captureMountedTurns();
+        reconcileTargetState();
+        refreshOpenCanvasPanel();
+        return true;
+    }
+
+    function receiveInlineCanvasPreload(event) {
+        const data = event.data;
+        if (data?.channel !== INLINE_MESSAGE || data.kind !== 'preload' ||
+            !isScfOrigin(event.origin) || !validateInlineCanvasHTML(data.html) ||
+            !isConversationRouteCandidate()) return false;
+        const route = deriveRouteKey();
+        if (currentRouteKey && currentRouteKey !== route) return false;
+        for (const iframe of document.querySelectorAll(SELECTORS.canvasIframe)) {
+            if (!isInlineCanvasIframe(iframe) || !document.contains(iframe)) continue;
+            try {
+                const outer = iframe.contentWindow;
+                const fromOuter = event.source === outer && event.origin === new URL(iframe.src).origin;
+                let fromInner = false;
+                for (let index = 0; !fromInner && index < Math.min(outer.frames.length, 4); index++)
+                    fromInner = event.source === outer.frames[index];
+                if (fromOuter || fromInner) {
+                    if (!currentRouteKey) currentRouteKey = route;
+                    return acceptInlineCanvasSource(iframe, data.html);
+                }
+            } catch (_) { /* Inaccessible/removed frame; fail closed. */ }
+        }
+        console.warn(TAG, `Inline preload ignored: no matching live frame (source available: ${!!event.source})`);
+        return false;
+    }
+
+    function receiveInlineCanvasMessage(event) {
+        const data = event.data;
+        if (data?.channel === INLINE_MESSAGE && data.kind === 'bridge-ready' &&
+            isScfOrigin(event.origin) && isConversationRouteCandidate()) {
+            console.info(TAG, `Inline bridge reached Google: ${data.phase === 'shim' ? 'shim' : 'blob'} on ${new URL(event.origin).hostname}`);
+            return false;
+        }
+        if (data?.channel === INLINE_MESSAGE && data.kind === 'preload' && isScfOrigin(event.origin))
+            console.info(TAG, `Inline preload received: ${typeof data.html === 'string' ? data.html.length : 0} characters, source ${event.source ? 'present' : 'null'}`);
+        if (data?.kind === 'preload') return receiveInlineCanvasPreload(event);
+        if (!data || data.channel !== INLINE_MESSAGE || data.kind !== 'source' ||
+            typeof data.nonce !== 'string' || typeof data.html !== 'string') return false;
+        const challenge = inlineChallenges.get(data.nonce);
+        const fromOuter = challenge && event.source === challenge.iframe.contentWindow &&
+            event.origin === challenge.origin;
+        const fromInner = challenge && challenge.innerWindow && event.source === challenge.innerWindow &&
+            isScfOrigin(event.origin);
+        // Some extension execution worlds expose a null MessageEvent.source.
+        // A response can still be bound to one observed frame by the 192-bit
+        // nonce delivered only to that frame (or its immediate sandbox relay).
+        const fromNonceOnly = challenge && event.source === null && isScfOrigin(event.origin);
+        if (!challenge || challenge.route !== currentRouteKey || data.route !== challenge.routeTag ||
+            (!fromOuter && !fromInner && !fromNonceOnly) ||
+            !document.contains(challenge.iframe)) return false;
+        clearTimeout(challenge.timeout);
+        inlineChallenges.delete(data.nonce);
+        return acceptInlineCanvasSource(challenge.iframe, data.html);
+    }
+
+    function registerCanvasSource(sourceNode, iframe = null) {
+        if (!sourceNode.closest('[aria-label="Canvas preview"]'))
+            return { record: null, added: false };
+        watchCanvasSource(sourceNode);
+        const html = extractModernCanvasHTML(sourceNode);
+        if (!html) {
+            const prior = canvasBySource.get(sourceNode);
+            if (prior && prior.sourceNode === sourceNode) {
+                const index = registry.indexOf(prior);
+                if (index >= 0) registry.splice(index, 1);
+                registry.forEach((record, index) => { record.id = index; });
+                canvasBySource.delete(sourceNode);
+                if (prior.iframe) canvasByIframe.delete(prior.iframe);
+                document.getElementById('gce-overlay')?.remove();
+            }
+            return { record: null, added: false };
+        }
+        const fingerprint = stringHash(html);
+        const known = canvasBySource.get(sourceNode);
+        if (known) {
+            if (known.fingerprint !== fingerprint) {
+                known.widgetHTML = html;
+                known.fingerprint = fingerprint;
+                known.title = extractTitle(new DOMParser().parseFromString(html, 'text/html'));
+                const card = document.querySelector(`.gce-canvas-card[data-idx="${known.id}"] .gce-ct`);
+                if (card) card.textContent = known.title;
+            }
+            known.sourceNode = sourceNode;
+            if (iframe) {
+                known.iframe = iframe;
+                canvasByIframe.set(iframe, known);
+            }
+            return { record: known, added: false };
+        }
+        const duplicate = registry.find(canvas => canvas.format === 'modern' && canvas.fingerprint === fingerprint);
+        if (duplicate) {
+            canvasBySource.set(sourceNode, duplicate);
+            duplicate.sourceNode = sourceNode;
+            if (iframe) {
+                duplicate.iframe = iframe;
+                canvasByIframe.set(iframe, duplicate);
+            }
+            return { record: duplicate, added: false };
+        }
+        const title = extractTitle(new DOMParser().parseFromString(html, 'text/html'));
+        const record = { id: registry.length, widgetHTML: html, title, type: 'HTML',
+            format: 'modern', fingerprint, iframe, sourceNode };
+        registry.push(record);
+        canvasBySource.set(sourceNode, record);
+        if (iframe) canvasByIframe.set(iframe, record);
+        console.log(TAG, `Canvas registered: "${title}" [modern HTML]`);
+        return { record, added: true };
+    }
+
     function registerCanvasIframe(iframe) {
         const known = canvasByIframe.get(iframe);
+        if (known?.format === 'modern' && known.sourceNode)
+            return registerCanvasSource(known.sourceNode, iframe);
         if (known) return { record: known, added: false };
         const widgetHTML = extractWidgetHTMLFromComment(iframe);
-        if (!widgetHTML) return { record: null, added: false };
+        if (!widgetHTML) {
+            const sourceNode = iframe.closest('[aria-label="Canvas preview"]')
+                ?.querySelector(SELECTORS.modernCanvasSource);
+            if (sourceNode) return registerCanvasSource(sourceNode, iframe);
+            if (isInlineCanvasIframe(iframe)) requestInlineCanvasSource(iframe);
+            return { record: null, added: false };
+        }
 
         taggedIframes.add(iframe);
         const doc = new DOMParser().parseFromString(widgetHTML, 'text/html');
@@ -1052,6 +1558,7 @@
             widgetHTML,
             title,
             type: detectType(widgetHTML),
+            format: 'legacy',
             iframe
         };
         registry.push(record);
@@ -1065,8 +1572,17 @@
     }
 
     function scanCanvases(root = document) {
+        if (!isConversationRouteCandidate()) return 0;
         debugStats.canvasScans++;
         let added = 0;
+        const sources = [];
+        if (root.matches?.(SELECTORS.modernCanvasSource)) sources.push(root);
+        root.querySelectorAll?.(SELECTORS.modernCanvasSource).forEach(source => sources.push(source));
+        for (const source of sources) {
+            const iframe = source.closest('[aria-label="Canvas preview"]')
+                ?.querySelector(SELECTORS.canvasIframe);
+            if (registerCanvasSource(source, iframe).added) added++;
+        }
         for (const iframe of findCanvasIframes(root)) {
             if (registerCanvasIframe(iframe).added) added++;
         }
@@ -1104,11 +1620,17 @@
     function resetRouteState(routeKey = deriveRouteKey()) {
         abortHydration();
         stopObserver();
+        stopCanvasObserver();
         turnCache.clear();
         snapshotFingerprints.clear();
         registry.length = 0;
         taggedIframes = new WeakSet();
         canvasByIframe = new WeakMap();
+        canvasBySource = new WeakMap();
+        inlineProbeAt = new WeakMap();
+        inlineProbeAttempts = new WeakMap();
+        for (const pending of inlineChallenges.values()) clearTimeout(pending.timeout);
+        inlineChallenges.clear();
         nextTurnOrder = 0;
         hydratedRouteKey = '';
         hydratedTurnCount = -1;
@@ -1142,14 +1664,35 @@
     }
 
     function reconcileTargetState() {
+        if (!isConversationRouteCandidate()) {
+            abortHydration();
+            stopObserver();
+            registry.length = 0;
+            turnCache.clear();
+            snapshotFingerprints.clear();
+            taggedIframes = new WeakSet();
+            canvasByIframe = new WeakMap();
+            canvasBySource = new WeakMap();
+            inlineProbeAt = new WeakMap();
+            inlineProbeAttempts = new WeakMap();
+            for (const pending of inlineChallenges.values()) clearTimeout(pending.timeout);
+            inlineChallenges.clear();
+            removeExporterUI();
+            stopCanvasObserver();
+            return false;
+        }
         const host = getConversationHost();
         if (!host) {
             turnCache.clear();
             snapshotFingerprints.clear();
-            if (!document.querySelector(SELECTORS.canvasIframe)) {
+            if (!document.querySelector(`${SELECTORS.canvasIframe}, ${SELECTORS.modernCanvasSource}`)) {
                 registry.length = 0;
                 taggedIframes = new WeakSet();
                 canvasByIframe = new WeakMap();
+                canvasBySource = new WeakMap();
+                sourceObserver?.disconnect();
+                sourceObserver = null;
+                watchedCanvasSources = new WeakSet();
             }
         }
         const verified = hasExportableConversation() || registry.length > 0;
@@ -1169,6 +1712,69 @@
     function nodeContainsProbe(node) {
         return node?.nodeType === Node.ELEMENT_NODE &&
             (node.matches?.(SELECTORS.probe) || node.querySelector?.(SELECTORS.probe));
+    }
+
+    function stopCanvasObserver() {
+        canvasObserver?.disconnect();
+        canvasObserver = null;
+        sourceObserver?.disconnect();
+        sourceObserver = null;
+        watchedCanvasSources = new WeakSet();
+    }
+
+    function watchCanvasSource(sourceNode) {
+        if (watchedCanvasSources.has(sourceNode)) return;
+        if (!sourceObserver) sourceObserver = new MutationObserver(mutations => {
+            for (const mutation of mutations) {
+                const source = mutation.target.nodeType === Node.ELEMENT_NODE
+                    ? mutation.target.closest(SELECTORS.modernCanvasSource)
+                    : mutation.target.parentElement?.closest(SELECTORS.modernCanvasSource);
+                if (source) pendingProbeRoots.add(source);
+            }
+            if (pendingProbeRoots.size) scheduleDiscovery(null);
+        });
+        sourceObserver.observe(sourceNode, { childList: true, characterData: true, subtree: true });
+        watchedCanvasSources.add(sourceNode);
+    }
+
+    function startCanvasObserver() {
+        if (canvasObserver || !isConversationRouteCandidate()) return;
+        const canvasProbe = `${SELECTORS.canvasIframe}, ${SELECTORS.modernCanvasSource}`;
+        canvasObserver = new MutationObserver(mutations => {
+            let relevant = false;
+            for (const mutation of mutations) {
+                const target = mutation.target.nodeType === Node.ELEMENT_NODE
+                    ? mutation.target : mutation.target.parentElement;
+                const source = target?.closest?.(SELECTORS.modernCanvasSource);
+                if (source) {
+                    pendingProbeRoots.add(source);
+                    relevant = true;
+                    continue;
+                }
+                if (mutation.type === 'attributes' && target?.matches?.(SELECTORS.canvasIframe)) {
+                    pendingProbeRoots.add(target);
+                    relevant = true;
+                    continue;
+                }
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE &&
+                        (node.matches(canvasProbe) || node.querySelector(canvasProbe))) {
+                        pendingProbeRoots.add(node);
+                        relevant = true;
+                    } else if (node.nodeType === Node.COMMENT_NODE &&
+                        String(node.textContent || '').includes('TgQPHd|') &&
+                        target?.closest?.('.emqXtf, .Q9iar, .MngkG')) {
+                        pendingProbeRoots.add(target.closest('.emqXtf, .Q9iar, .MngkG'));
+                        relevant = true;
+                    }
+                }
+            }
+            if (relevant) scheduleDiscovery(null);
+        });
+        canvasObserver.observe(document.documentElement, {
+            childList: true, subtree: true,
+            attributes: true, attributeFilter: ['src', 'srcdoc']
+        });
     }
 
     function runScheduledDiscovery() {
@@ -1250,20 +1856,31 @@
         if (routeKey !== currentRouteKey) {
             resetRouteState(routeKey);
             lastLocationHref = location.href;
-            discoveryDeadline = isPotentialAIModeURL() ? Number.POSITIVE_INFINITY : Date.now() + 10000;
-            startObserver(document.documentElement);
-            if (isConversationRouteCandidate()) setTimeout(() => scheduleDiscovery(document.documentElement), 300);
+            discoveryDeadline = isConversationRouteCandidate() ? Number.POSITIVE_INFINITY : 0;
+            if (isConversationRouteCandidate()) {
+                startObserver(document.documentElement);
+                startCanvasObserver();
+                setTimeout(() => scheduleDiscovery(document.documentElement), 300);
+            }
             return;
         }
         lastLocationHref = location.href;
+
+        if (!isConversationRouteCandidate()) {
+            reconcileTargetState();
+            stopObserver();
+            stopCanvasObserver();
+            return;
+        }
 
         scanCanvases(document);
         if (getConversationHost()) captureMountedTurns();
         reconcileTargetState();
 
         const host = getConversationHost();
+        startCanvasObserver();
         if (host) startObserver(host);
-        else if (isPotentialAIModeURL() || registry.length || Date.now() < discoveryDeadline) {
+        else if (isConversationRouteCandidate() || registry.length || Date.now() < discoveryDeadline) {
             startObserver(document.documentElement);
         } else if (hrefChanged || Date.now() >= discoveryDeadline) {
             stopObserver();
@@ -1432,9 +2049,10 @@
 .gce-ov{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);display:flex;
   align-items:center;justify-content:center;backdrop-filter:blur(4px);
   font-family:'Google Sans',Roboto,sans-serif}
-.gce-panel{background:#1A1C24;border:1px solid #3a3f50;border-radius:20px;
-  box-shadow:0 24px 64px rgba(0,0,0,.6);color:#E6E8F0;width:1080px;max-width:95vw;
-  max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+ .gce-panel{background:#1A1C24;border:1px solid #3a3f50;border-radius:20px;
+   box-shadow:0 24px 64px rgba(0,0,0,.6);color:#E6E8F0;width:1080px;max-width:95vw;
+   max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+ .gce-panel [hidden]{display:none!important}
 .gce-ph{padding:18px 22px 14px;display:flex;align-items:center;justify-content:space-between;
   border-bottom:1px solid #2D2F38;flex-shrink:0}
 .gce-ph h3{font-size:17px;font-weight:700;margin:0}
@@ -1580,7 +2198,7 @@
                 let group = '';
                 while (i < children.length && children[i].ordered === ordered) {
                     const child = children[i++];
-                    group += `<li>${renderInlineMarkdown(child.text)}${renderChildren(child.children)}</li>`;
+                    group += `<li>${renderInlineMarkdown(child.text)}${(child.blocks || []).join('')}${renderChildren(child.children)}</li>`;
                 }
                 html += `<${tag}>${group}</${tag}>`;
             }
@@ -1601,20 +2219,20 @@
             }
         }
         const isSpecial = (line, next) => !line.trim()
-            || /^\s*```/.test(line) || /^#{1,6}\s+/.test(line) || /^\s*>/.test(line)
+            || !!markdownFenceOpen(line) || /^#{1,6}\s+/.test(line) || /^\s*>/.test(line)
             || /^\s*(?:[-*]|\d+\.)\s+/.test(line) || /^\s*(?:---|\*\*\*)\s*$/.test(line)
             || (line.includes('|') && /^\s*\|?\s*:?-{3,}/.test(next || ''));
 
         while (i < lines.length) {
             const line = lines[i];
             if (!line.trim()) { i++; continue; }
-            const fence = line.match(/^\s*```([^\s]*)/);
+            const fence = markdownFenceOpen(line);
             if (fence) {
                 const code = [];
                 i++;
-                while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+                while (i < lines.length && !markdownFenceClose(lines[i], fence)) code.push(lines[i++]);
                 if (i < lines.length) i++;
-                output.push(`<pre><code data-language="${escapeHTML(fence[1] || '')}">${escapeHTML(code.join('\n'))}</code></pre>`);
+                output.push(`<pre><code data-language="${escapeHTML(fence.info.split(/\s+/)[0] || '')}">${escapeHTML(code.join('\n'))}</code></pre>`);
                 continue;
             }
             const heading = line.match(/^(#{1,6})\s+(.+)$/);
@@ -1640,12 +2258,27 @@
                 while (i < lines.length) {
                     const item = lines[i].match(/^(\s*)([-*]|\d+\.)\s+(.+)$/);
                     if (!item) break;
-                    items.push({
+                    const entry = {
                         depth: Math.floor(item[1].replace(/\t/g, '  ').length / 2),
                         ordered: /\d+\./.test(item[2]),
-                        text: item[3]
-                    });
+                        text: item[3],
+                        blocks: []
+                    };
+                    items.push(entry);
                     i++;
+                    const contentIndent = item[1].length + item[2].length + 1;
+                    let next = i;
+                    if (!lines[next]?.trim()) next++;
+                    const continuationFence = markdownFenceOpen(lines[next] || '');
+                    if (continuationFence && /^\s*/.exec(lines[next])[0].length >= contentIndent) {
+                        i = next + 1;
+                        const code = [];
+                        while (i < lines.length && !markdownFenceClose(lines[i], continuationFence)) {
+                            code.push(lines[i++].slice(contentIndent));
+                        }
+                        if (i < lines.length) i++;
+                        entry.blocks.push(`<pre><code data-language="${escapeHTML(continuationFence.info.split(/\s+/)[0] || '')}">${escapeHTML(code.join('\n'))}</code></pre>`);
+                    }
                 }
                 output.push(renderListItems(items));
                 continue;
@@ -1682,6 +2315,63 @@
             `${summary.canvasCount} canvas${summary.canvasCount === 1 ? '' : 'es'}`;
     }
 
+    function countUnverifiedInlineCanvases() {
+        return [...(getConversationHost()?.querySelectorAll('.MngkG iframe.lQ27pc') || [])]
+            .filter(iframe => isInlineCanvasIframe(iframe) && !canvasByIframe.has(iframe)).length;
+    }
+
+    function canvasCardHTML(canvas, index) {
+        const col = TYPE_COLORS[canvas.type] || '#ADAFB8';
+        const filename = defaultCanvasFilename(canvas, index);
+        return `<div class="gce-ci gce-canvas-card" data-idx="${index}">
+            <div class="gce-cr">
+                <input type="checkbox" class="gce-canvas-cb" checked data-idx="${index}">
+                <span class="gce-ct" title="${escapeHTML(canvas.title)}">${escapeHTML(canvas.title)}</span>
+                <span class="gce-badge" style="background:${col}22;color:${col};border:1px solid ${col}44">${canvas.type}</span>
+            </div>
+            <input class="gce-fi gce-canvas-name" data-idx="${index}" value="${escapeHTML(filename)}" data-default="${escapeHTML(filename)}">
+        </div>`;
+    }
+
+    function refreshOpenCanvasPanel() {
+        const ov = document.getElementById('gce-overlay');
+        if (!ov) return;
+        const section = ov.querySelector('#gce-canvas-section');
+        if (!section) return;
+        section.hidden = registry.length === 0;
+        ov.querySelector('#gce-canvas-toggle').hidden = registry.length === 0;
+        ov.querySelector('#gce-canvas-only').hidden = registry.length === 0;
+        ov.querySelector('#gce-canvas-count').textContent = String(registry.length);
+        const cards = ov.querySelector('#gce-canvas-cards');
+        registry.forEach((record, index) => {
+            const card = cards.querySelector(`.gce-canvas-card[data-idx="${index}"]`);
+            if (!card) cards.insertAdjacentHTML('beforeend', canvasCardHTML(record, index));
+            else {
+                const label = card.querySelector('.gce-ct');
+                if (label.textContent !== record.title) {
+                    const input = card.querySelector('.gce-canvas-name');
+                    if (input.value === input.dataset.default) {
+                        input.value = defaultCanvasFilename(record, index);
+                        input.dataset.default = input.value;
+                    }
+                }
+                label.textContent = record.title;
+                label.title = record.title;
+            }
+        });
+        ov.querySelector('#gce-modern-note').hidden = !registry.some(canvas =>
+            canvas.format === 'modern' || canvas.format === 'inline');
+        const warning = ov.querySelector('#gce-inline-warning');
+        if (warning) {
+            const unknown = countUnverifiedInlineCanvases();
+            warning.hidden = unknown === 0;
+            warning.textContent = `${unknown} inline canvas preview${unknown === 1 ? '' : 's'} could not yet be captured. ` +
+                'Only verified canvases are exportable. Allow this userscript in nested ' +
+                'scf.usercontent.goog/search-sandbox/shim.html frames, then reload the thread.';
+        }
+        ov.querySelector('#gce-refresh-preview')?.click();
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  UNIFIED EXPORT PANEL
     // ═══════════════════════════════════════════════════════════
@@ -1689,8 +2379,15 @@
     function openExportPanel() {
         document.getElementById('gce-overlay')?.remove();
 
+        getConversationHost()?.querySelectorAll('.MngkG iframe.lQ27pc').forEach(iframe => {
+            if (!canvasByIframe.has(iframe)) {
+                inlineProbeAt.delete(iframe);
+                inlineProbeAttempts.delete(iframe);
+            }
+        });
         captureMountedTurns();
         const hasConv = hasExportableConversation();
+        scanCanvases(document);
         const hasCanvas = registry.length > 0;
 
         if (!hasConv && !hasCanvas) {
@@ -1749,26 +2446,17 @@
                 </div>
             </div>` : '';
 
-        const canvasCards = hasCanvas ? registry.map((c, i) => {
-            const col = TYPE_COLORS[c.type] || '#ADAFB8';
-            return `<div class="gce-ci gce-canvas-card" data-idx="${i}">
-                <div class="gce-cr">
-                    <input type="checkbox" class="gce-canvas-cb" checked data-idx="${i}">
-                    <span class="gce-ct" title="${escapeHTML(c.title)}">${escapeHTML(c.title)}</span>
-                    <span class="gce-badge" style="background:${col}22;color:${col};border:1px solid ${col}44">${c.type}</span>
-                </div>
-                <input class="gce-fi gce-canvas-name" data-idx="${i}" value="${escapeHTML(makeFilename(c.title))}">
-            </div>`;
-        }).join('') : '';
-
-        const canvasSection = hasCanvas ? `
-            <div class="gce-sl" style="margin-top:16px">CANVASES <span class="gce-pill">${registry.length}</span></div>
-            ${canvasCards}
+        const canvasSection = `
+            <section id="gce-canvas-section" ${hasCanvas ? '' : 'hidden'}>
+            <div class="gce-sl" style="margin-top:16px">CANVASES <span class="gce-pill" id="gce-canvas-count">${registry.length}</span></div>
+            <div id="gce-canvas-cards">${registry.map(canvasCardHTML).join('')}</div>
+            <div class="gce-preview-meta" id="gce-modern-note" ${registry.some(canvas =>
+                canvas.format === 'modern' || canvas.format === 'inline') ? '' : 'hidden'}>Modern HTML canvases export with authored styling and dependencies. Theme and viewport overrides apply to legacy widgets only.</div>
             <div class="gce-sg">
                 <label class="gce-tg"><input type="checkbox" id="gce-dark" checked> Dark mode</label>
                 <label class="gce-tg"><input type="checkbox" id="gce-full" checked> Full viewport</label>
                 <label class="gce-tg"><input type="checkbox" id="gce-html-meta" checked> Embed metadata</label>
-            </div>` : '';
+            </div></section>`;
 
         ov.innerHTML = `<div class="gce-panel">
             <div class="gce-ph">
@@ -1777,6 +2465,7 @@
             </div>
             <div class="gce-body">
                 ${convSection}
+                <div class="gce-warn" id="gce-inline-warning" hidden></div>
                 ${canvasSection}
                 <div class="gce-mf" style="margin-top:14px">
                     <span class="gce-ml">Source URL</span>
@@ -1789,17 +2478,18 @@
             </div>
             <div class="gce-pf">
                 <div class="gce-pf-left">
-                    ${hasCanvas ? '<button class="gce-sa gce-canvas-toggle">Deselect Canvases</button>' : ''}
+                    <button class="gce-sa gce-canvas-toggle" id="gce-canvas-toggle" ${hasCanvas ? '' : 'hidden'}>Deselect Canvases</button>
                 </div>
                 <div class="gce-pf-left">
                     ${hasConv ? '<button class="gce-sb" id="gce-conv-only">Conversation Only</button>' : ''}
-                    ${hasCanvas ? '<button class="gce-sb" id="gce-canvas-only">Canvases Only</button>' : ''}
+                    <button class="gce-sb" id="gce-canvas-only" ${hasCanvas ? '' : 'hidden'}>Canvases Only</button>
                     <button class="gce-eb" id="gce-export-all">Export All</button>
                 </div>
             </div>
         </div>`;
 
         document.body.appendChild(ov);
+        refreshOpenCanvasPanel();
         const closePanel = () => {
             abortHydration();
             ov.remove();
@@ -1923,7 +2613,7 @@
                 }
             }
 
-            const wantCanvas = (mode === 'all' || mode === 'canvas') && hasCanvas;
+            const wantCanvas = (mode === 'all' || mode === 'canvas') && registry.length > 0;
             if (wantCanvas) {
                 const isDark = ov.querySelector('#gce-dark')?.checked !== false;
                 const fullVP = ov.querySelector('#gce-full')?.checked !== false;
@@ -1948,6 +2638,7 @@
                 return;
             }
 
+            dedupeExportFilenames(jobs);
             abortHydration();
             ov.remove();
             let mdCount = 0, htmlCount = 0;
@@ -1957,7 +2648,7 @@
                     downloadBlob(job.content, job.filename, 'text/markdown');
                     mdCount++;
                 } else {
-                    const html = buildExportHTML(job.canvas.widgetHTML, job.opts);
+                    const html = buildCanvasExportHTML(job.canvas, job.opts);
                     if (html) { downloadBlob(html, job.filename, 'text/html'); htmlCount++; }
                 }
                 if (i < jobs.length - 1) await new Promise(r => setTimeout(r, 500));
@@ -2001,6 +2692,46 @@
 
     function escapeScriptClose(src) {
         return src.replace(/<\/script/gi, '<\\/script');
+    }
+
+    function buildModernExportHTML(html, opts = {}) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        if (!doc.body || !doc.querySelector('html head') || !doc.querySelector('html body') ||
+            (!opts.allowEmptyMount && textCompact(doc.body.textContent).length < 30)) return null;
+        // Keep authored CSS, scripts, CDN references, and responsive layout intact.
+        // Only a CSP meta tag is removed, as it would block a local file export.
+        const withoutCSP = html.replace(/<meta\b(?=[^>]*http-equiv\s*=\s*["']?content-security-policy\b)[^>]*>/gi, '');
+        if (!opts.meta) return withoutCSP;
+        const safe = value => String(value ?? '').replace(/--/g, '- -').replace(/>/g, '&gt;');
+        const comment = `<!-- Exported by Google AI Canvas Exporter v${VERSION}\n` +
+            `Canvas: ${safe(opts.title)}\nSource: ${safe(opts.srcURL)}\n` +
+            `Date: ${safe(new Date().toLocaleString('en-US'))} -->\n`;
+        return comment + withoutCSP;
+    }
+
+    function buildInlineExportHTML(html, opts = {}) {
+        if (!validateInlineCanvasHTML(html)) return null;
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        doc.querySelectorAll('meta[http-equiv], [data-sandbox-injected]').forEach(node => {
+            if (node.hasAttribute('data-sandbox-injected') ||
+                node.getAttribute('http-equiv')?.toLowerCase() === 'content-security-policy') node.remove();
+        });
+        doc.querySelectorAll('script:not([src])').forEach(script => {
+            const code = script.textContent || '';
+            if (code.length < 2000 && code.includes('request_window_open') &&
+                code.includes('window.open')) script.remove();
+        });
+        doc.querySelectorAll('iframe[sandbox]').forEach(frame => frame.removeAttribute('sandbox'));
+        return buildModernExportHTML('<!DOCTYPE html>\n' + doc.documentElement.outerHTML,
+            { ...opts, allowEmptyMount: true });
+    }
+
+    function buildCanvasExportHTML(record, opts = {}) {
+        if (!record?.widgetHTML) return null;
+        if (record.format === 'inline') return buildInlineExportHTML(record.widgetHTML, opts);
+        return record.format === 'modern'
+            ? buildModernExportHTML(record.widgetHTML, opts)
+            : buildExportHTML(record.widgetHTML, opts);
     }
 
     function buildExportHTML(widgetHTML, opts) {
@@ -2218,6 +2949,21 @@
             hasExportableConversation,
             scanCanvases,
             buildExportHTML,
+            buildModernExportHTML,
+            buildInlineExportHTML,
+            buildCanvasExportHTML,
+            defaultCanvasFilename,
+            makeMarkdownFilename,
+            dedupeExportFilenames,
+            extractModernCanvasHTML,
+            isInlineCanvasIframe,
+            validateInlineCanvasHTML,
+            registerInlineCanvasSource,
+            requestInlineCanvasSource,
+            receiveInlineCanvasMessage,
+            getPendingInlineChallenges: () => [...inlineChallenges.entries()].map(([nonce, item]) =>
+                ({ nonce, route: item.routeTag, origin: item.origin, iframe: item.iframe,
+                    innerWindow: item.innerWindow })),
             reconcileTargetState,
             reconcileRoute,
             resetRouteState,
@@ -2225,7 +2971,9 @@
             scheduleDiscovery,
             startObserver,
             stopObserver,
-            getRegistry: () => registry.map(({ id, widgetHTML, title, type }) => ({ id, widgetHTML, title, type })),
+            stopCanvasObserver,
+            getRegistry: () => registry.map(({ id, widgetHTML, title, type, format }) =>
+                ({ id, widgetHTML, title, type, format })),
             getUIState: () => ({
                 fab: !!document.querySelector('.gce-fab'),
                 badge: document.querySelector('.gce-fab-badge')?.textContent || '',
@@ -2235,6 +2983,9 @@
         });
     }
 
+    // A shim can deliver its source before DOMContentLoaded, so the listener
+    // must be ready at document-start rather than in initializeTopPage().
+    if (!TEST_MODE) window.addEventListener('message', receiveInlineCanvasMessage);
     if (TEST_MODE) {
         exposeTestAPI();
         return;
@@ -2244,32 +2995,37 @@
         setTimeout(reconcileRoute, 0);
     }
 
-    for (const method of ['pushState', 'replaceState']) {
-        const original = history[method];
-        history[method] = function (...args) {
-            const result = original.apply(this, args);
-            scheduleRouteReconcile();
-            return result;
-        };
-    }
-    window.addEventListener('popstate', scheduleRouteReconcile);
-    installScrollListener();
-
-    currentRouteKey = deriveRouteKey();
-    discoveryDeadline = isPotentialAIModeURL() ? Number.POSITIVE_INFINITY : Date.now() + 10000;
-    reconcileRoute();
-    routeTimer = setInterval(() => {
-        const routeChanged = lastLocationHref !== location.href || deriveRouteKey() !== currentRouteKey;
-        if (routeChanged) {
-            discoveryDeadline = isPotentialAIModeURL() ? Number.POSITIVE_INFINITY : Date.now() + 10000;
-            reconcileRoute();
-        } else if (observerRoot && observerRoot !== document.documentElement && !document.contains(observerRoot)) {
-            turnCache.clear();
-            reconcileTargetState();
-            startObserver(document.documentElement);
-        } else if (!fabEl && !getConversationHost() && Date.now() >= discoveryDeadline) {
-            stopObserver();
+    function initializeTopPage() {
+        for (const method of ['pushState', 'replaceState']) {
+            const original = history[method];
+            history[method] = function (...args) {
+                const result = original.apply(this, args);
+                scheduleRouteReconcile();
+                return result;
+            };
         }
-    }, 500);
+        window.addEventListener('popstate', scheduleRouteReconcile);
+        installScrollListener();
+
+        currentRouteKey = deriveRouteKey();
+        discoveryDeadline = isConversationRouteCandidate() ? Number.POSITIVE_INFINITY : 0;
+        reconcileRoute();
+        routeTimer = setInterval(() => {
+            const routeChanged = lastLocationHref !== location.href || deriveRouteKey() !== currentRouteKey;
+            if (routeChanged) {
+                discoveryDeadline = isConversationRouteCandidate() ? Number.POSITIVE_INFINITY : 0;
+                reconcileRoute();
+            } else if (observerRoot && observerRoot !== document.documentElement && !document.contains(observerRoot)) {
+                turnCache.clear();
+                reconcileTargetState();
+                startObserver(document.documentElement);
+            } else if (!fabEl && !getConversationHost() && Date.now() >= discoveryDeadline) {
+                stopObserver();
+            }
+        }, 500);
+    }
+    if (document.readyState === 'loading')
+        document.addEventListener('DOMContentLoaded', initializeTopPage, { once: true });
+    else initializeTopPage();
 
 })();
