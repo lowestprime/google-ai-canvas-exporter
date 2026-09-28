@@ -4,7 +4,7 @@
 // @author            lowestprime x Claude Opus 4.6 Max Agent
 // @namespace         https://greasyfork.org/en/users/823161-lowestprime
 // @license           MIT
-// @version           5.0.10
+// @version           5.0.11
 // @match             *://www.google.com/search*
 // @match             *://*.google.com/search*
 // @match             https://*.scf.usercontent.goog/search-sandbox/shim.html*
@@ -17,7 +17,7 @@
     'use strict';
 
     const TAG = '[GCE]';
-    const VERSION = '5.0.10';
+    const VERSION = '5.0.11';
     const INLINE_MESSAGE = 'gce-inline-canvas-v1';
     const MAX_INLINE_HTML = 5_000_000;
 
@@ -185,6 +185,14 @@
             'iframe[src*="scf.usercontent.goog"], iframe.lQ27pc, [data-xid="mnldjf"]'
     });
     const TEST_MODE = globalThis.__GCE_TEST_MODE__ === true;
+    const PREF_STORAGE_KEY = 'gce.exportPreferences.v1';
+    const PREF_DEFAULTS = Object.freeze({
+        includeConversation: true, frontmatter: true, turnDates: true,
+        darkMode: true, fullViewport: true, embedMetadata: true
+    });
+    let preferenceCache = null;
+    let preferenceWarningShown = false;
+    let preferenceStorageListening = false;
     let taggedIframes = new WeakSet();
     let canvasByIframe = new WeakMap();
     let canvasBySource = new WeakMap();
@@ -1033,6 +1041,79 @@
         return (hash >>> 0).toString(36);
     }
 
+    function exportPreferences() {
+        if (preferenceCache) return preferenceCache;
+        if (!preferenceStorageListening) {
+            preferenceStorageListening = true;
+            window.addEventListener('storage', event => {
+                if (event.key === PREF_STORAGE_KEY) preferenceCache = null;
+            });
+        }
+        const options = { ...PREF_DEFAULTS };
+        const routes = [];
+        try {
+            const raw = localStorage.getItem(PREF_STORAGE_KEY);
+            const saved = raw && raw.length < 32_000 ? JSON.parse(raw) : null;
+            if (saved?.version === 1) {
+                for (const key of Object.keys(options)) {
+                    if (typeof saved.options?.[key] === 'boolean') options[key] = saved.options[key];
+                }
+                if (Array.isArray(saved.routes)) {
+                    for (const route of saved.routes.slice(-20)) {
+                        if (!/^[a-z0-9]+-[a-z0-9]+$/.test(route?.key) ||
+                            typeof route.all !== 'boolean') continue;
+                        const overrides = Object.create(null);
+                        for (const [key, value] of Object.entries(route.overrides || {}).slice(0, 50)) {
+                            if (/^[a-z0-9]+-[a-z0-9]+$/.test(key) && typeof value === 'boolean')
+                                overrides[key] = value;
+                        }
+                        routes.push({ key: route.key, all: route.all, overrides });
+                    }
+                }
+            }
+        } catch (_) { /* Private or blocked storage: retain in-memory defaults. */ }
+        preferenceCache = { options, routes };
+        return preferenceCache;
+    }
+
+    function saveExportPreferences() {
+        const prefs = exportPreferences();
+        prefs.routes = prefs.routes.slice(-20);
+        try {
+            localStorage.setItem(PREF_STORAGE_KEY, JSON.stringify({ version: 1, ...prefs }));
+        } catch (_) {
+            if (!preferenceWarningShown) {
+                preferenceWarningShown = true;
+                showToast('Browser storage is blocked; export settings will reset after this page closes.', true);
+            }
+        }
+    }
+
+    function canvasRoutePreferences(create = false) {
+        const route = currentRouteKey || deriveRouteKey();
+        const key = `${stringHash(route)}-${stringHash(`gce:${route}`)}`;
+        const prefs = exportPreferences();
+        let entry = prefs.routes.find(item => item.key === key);
+        if (create) {
+            if (entry) prefs.routes.splice(prefs.routes.indexOf(entry), 1);
+            else entry = { key, all: true, overrides: Object.create(null) };
+            prefs.routes.push(entry);
+        }
+        return entry || { key, all: true, overrides: Object.create(null) };
+    }
+
+    function canvasPreferenceKey(canvas, index) {
+        const identity = canvas.format === 'inline' && canvas.identity ? canvas.identity :
+            `${canvas.title}:${index}`;
+        const value = `${canvas.format}:${identity}`;
+        return `${stringHash(value)}-${stringHash(`gce:${value}`)}`;
+    }
+
+    function canvasSelected(canvas, index) {
+        const route = canvasRoutePreferences();
+        return route.overrides[canvasPreferenceKey(canvas, index)] ?? route.all;
+    }
+
     function snapshotConversationSegment(segment, order) {
         const segmentRoot = segment.root;
         const prompt = extractUserText(segment.promptElement || segmentRoot);
@@ -1326,7 +1407,11 @@
             .filter(el => iframe.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)
             .map(el => textCompact(el.textContent).slice(0, 90))
             .find(label => /\bcanvas\b/i.test(label) && !/^AI Mode replied:/i.test(label));
-        return nearby || fallback || `Interactive Canvas ${registry.filter(item => item.format === 'inline').length + 1}`;
+        const frames = [...(getConversationHost()?.querySelectorAll(SELECTORS.canvasIframe) || [])]
+            .filter(isInlineCanvasIframe);
+        const ordinal = frames.indexOf(iframe);
+        return nearby || fallback || `Interactive Canvas ${ordinal >= 0 ? ordinal + 1 :
+            registry.filter(item => item.format === 'inline').length + 1}`;
     }
 
     function inlineCanvasIdentity(iframe) {
@@ -2323,9 +2408,10 @@
     function canvasCardHTML(canvas, index) {
         const col = TYPE_COLORS[canvas.type] || '#ADAFB8';
         const filename = defaultCanvasFilename(canvas, index);
-        return `<div class="gce-ci gce-canvas-card" data-idx="${index}">
+        const checked = canvasSelected(canvas, index);
+        return `<div class="gce-ci gce-canvas-card${checked ? '' : ' off'}" data-idx="${index}">
             <div class="gce-cr">
-                <input type="checkbox" class="gce-canvas-cb" checked data-idx="${index}">
+                <input type="checkbox" class="gce-canvas-cb" ${checked ? 'checked' : ''} data-idx="${index}">
                 <span class="gce-ct" title="${escapeHTML(canvas.title)}">${escapeHTML(canvas.title)}</span>
                 <span class="gce-badge" style="background:${col}22;color:${col};border:1px solid ${col}44">${canvas.type}</span>
             </div>
@@ -2361,6 +2447,7 @@
         });
         ov.querySelector('#gce-modern-note').hidden = !registry.some(canvas =>
             canvas.format === 'modern' || canvas.format === 'inline');
+        updateCanvasToggle(ov);
         const warning = ov.querySelector('#gce-inline-warning');
         if (warning) {
             const unknown = countUnverifiedInlineCanvases();
@@ -2375,6 +2462,13 @@
     // ═══════════════════════════════════════════════════════════
     //  UNIFIED EXPORT PANEL
     // ═══════════════════════════════════════════════════════════
+
+    function updateCanvasToggle(ov) {
+        const toggle = ov.querySelector('#gce-canvas-toggle');
+        if (!toggle) return;
+        const cards = [...ov.querySelectorAll('.gce-canvas-cb')];
+        toggle.textContent = cards.every(card => card.checked) ? 'Deselect Canvases' : 'Select Canvases';
+    }
 
     function openExportPanel() {
         document.getElementById('gce-overlay')?.remove();
@@ -2398,6 +2492,7 @@
         const threadTitle = extractThreadTitle(getCachedTurns());
         const mdFilename = makeMarkdownFilename(threadTitle);
         const initialSummary = summarizeConversation();
+        const prefs = exportPreferences().options;
 
         const ov = document.createElement('div');
         ov.id = 'gce-overlay';
@@ -2414,7 +2509,7 @@
             <div class="gce-warn" id="gce-hydration-status">Hydrating the thread to find virtualized segments…</div>
             <div class="gce-ci">
                 <div class="gce-cr">
-                    <input type="checkbox" id="gce-inc-conv" checked>
+                    <input type="checkbox" id="gce-inc-conv" ${prefs.includeConversation ? 'checked' : ''}>
                     <span class="gce-ct">Export conversation as Markdown</span>
                 </div>
                 <div class="gce-mf">
@@ -2426,8 +2521,8 @@
                     <input class="gce-fi" id="gce-md-name" value="${escapeHTML(mdFilename)}">
                 </div>
                 <div class="gce-sg">
-                    <label class="gce-tg"><input type="checkbox" id="gce-md-fm" checked> YAML frontmatter</label>
-                    <label class="gce-tg"><input type="checkbox" id="gce-md-dates" checked> Turn dates</label>
+                    <label class="gce-tg"><input type="checkbox" id="gce-md-fm" ${prefs.frontmatter ? 'checked' : ''}> YAML frontmatter</label>
+                    <label class="gce-tg"><input type="checkbox" id="gce-md-dates" ${prefs.turnDates ? 'checked' : ''}> Turn dates</label>
                 </div>
                 <div class="gce-preview-head">
                     <span class="gce-sl" style="margin:0">PREVIEW</span>
@@ -2453,9 +2548,9 @@
             <div class="gce-preview-meta" id="gce-modern-note" ${registry.some(canvas =>
                 canvas.format === 'modern' || canvas.format === 'inline') ? '' : 'hidden'}>Modern HTML canvases export with authored styling and dependencies. Theme and viewport overrides apply to legacy widgets only.</div>
             <div class="gce-sg">
-                <label class="gce-tg"><input type="checkbox" id="gce-dark" checked> Dark mode</label>
-                <label class="gce-tg"><input type="checkbox" id="gce-full" checked> Full viewport</label>
-                <label class="gce-tg"><input type="checkbox" id="gce-html-meta" checked> Embed metadata</label>
+                <label class="gce-tg"><input type="checkbox" id="gce-dark" ${prefs.darkMode ? 'checked' : ''}> Dark mode</label>
+                <label class="gce-tg"><input type="checkbox" id="gce-full" ${prefs.fullViewport ? 'checked' : ''}> Full viewport</label>
+                <label class="gce-tg"><input type="checkbox" id="gce-html-meta" ${prefs.embedMetadata ? 'checked' : ''}> Embed metadata</label>
             </div></section>`;
 
         ov.innerHTML = `<div class="gce-panel">
@@ -2565,22 +2660,49 @@
                 schedulePreviewRefresh();
             });
         }
-        ov.querySelector('#gce-md-fm')?.addEventListener('change', schedulePreviewRefresh);
-        ov.querySelector('#gce-md-dates')?.addEventListener('change', schedulePreviewRefresh);
+        const optionIds = {
+            'gce-inc-conv': 'includeConversation', 'gce-md-fm': 'frontmatter',
+            'gce-md-dates': 'turnDates', 'gce-dark': 'darkMode',
+            'gce-full': 'fullViewport', 'gce-html-meta': 'embedMetadata'
+        };
+        for (const [id, key] of Object.entries(optionIds)) {
+            ov.querySelector(`#${id}`)?.addEventListener('change', event => {
+                exportPreferences().options[key] = event.target.checked;
+                saveExportPreferences();
+                if (key === 'frontmatter' || key === 'turnDates') schedulePreviewRefresh();
+            });
+        }
         ov.querySelector('#gce-refresh-preview')?.addEventListener('click', () =>
             updateConversationPanel(null, { renderPreview: true })
         );
 
-        let canvasAllOn = true;
+        ov.querySelector('#gce-canvas-cards')?.addEventListener('change', event => {
+            const cb = event.target.closest('.gce-canvas-cb');
+            if (!cb) return;
+            const index = Number(cb.dataset.idx);
+            const canvas = registry[index];
+            if (!canvas) return;
+            const route = canvasRoutePreferences(true);
+            const key = canvasPreferenceKey(canvas, index);
+            if (cb.checked === route.all) delete route.overrides[key];
+            else route.overrides[key] = cb.checked;
+            cb.closest('.gce-ci').classList.toggle('off', !cb.checked);
+            updateCanvasToggle(ov);
+            saveExportPreferences();
+        });
         const canvasToggle = ov.querySelector('.gce-canvas-toggle');
         if (canvasToggle) {
             canvasToggle.onclick = () => {
-                canvasAllOn = !canvasAllOn;
-                canvasToggle.textContent = canvasAllOn ? 'Deselect Canvases' : 'Select Canvases';
+                const canvasAllOn = [...ov.querySelectorAll('.gce-canvas-cb')].some(cb => !cb.checked);
+                const route = canvasRoutePreferences(true);
+                route.all = canvasAllOn;
+                route.overrides = Object.create(null);
                 ov.querySelectorAll('.gce-canvas-cb').forEach(cb => {
                     cb.checked = canvasAllOn;
                     cb.closest('.gce-ci').classList.toggle('off', !canvasAllOn);
                 });
+                updateCanvasToggle(ov);
+                saveExportPreferences();
             };
         }
 
@@ -2620,7 +2742,7 @@
                 const meta = ov.querySelector('#gce-html-meta')?.checked !== false;
                 ov.querySelectorAll('.gce-canvas-card').forEach(card => {
                     const cb = card.querySelector('.gce-canvas-cb');
-                    if (mode === 'all' && cb && !cb.checked) return;
+                    if (cb && !cb.checked) return;
                     const idx = parseInt(card.dataset.idx);
                     const fname = card.querySelector('.gce-canvas-name')?.value.trim() || 'export';
                     jobs.push({
