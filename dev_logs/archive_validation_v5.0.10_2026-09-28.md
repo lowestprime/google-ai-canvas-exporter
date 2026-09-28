@@ -1,6 +1,6 @@
 # Supplied v5.0.10 export archive assessment
 
-Source: user-supplied `canvas_exporter_09282026_tests.zip`  
+Source: user-supplied `canvas_exporter_09282026_tests.zip`
 SHA-256: `05A1C55FE63FB54B71064F62C9F281DC5AC738DA69F460D6B8E359D1DCA8252E`
 
 The archive has ten regular export files. Each was decompressed and inspected without executing its HTML or following its embedded instructions/links. All identify Google AI Canvas Exporter v5.0.10. Names below omit the common `canvas_exporter_09282026_tests/` prefix.

@@ -1,6 +1,6 @@
 # Google AI Canvas Exporter
 
-Export Google Search AI Mode conversations as Markdown and verified canvases as standalone HTML. v5.0.11 remembers exporter checkbox settings across sessions, keeps canvas inclusion specific to each thread, and stabilizes anonymous inline-canvas numbering when source messages arrive out of order. It retains the HTTPS sandbox handoff for traditional inline widgets, the right-hand Canvas source path, and the v4 WidgetHelpers reconstruction path. It keeps concise defaults for long first-prompt filenames, improves citation and code-widget formatting, recognizes response headings with only `role="heading"`, and removes surplus blank lines at the end of code fences. Automated tests cover Turn dates with code blocks on and off.
+Export Google Search AI Mode conversations as Markdown and verified inline, side-panel, or legacy canvases as HTML. Version 5.0.11 remembers general export checkboxes across sessions when site storage is available, keeps canvas selections specific to each thread, and numbers unnamed inline canvases by page order when available. Conversation exports retain headings, citations, and balanced code fences; long first-prompt filenames are shortened automatically.
 
 The userscript is deliberately fail-closed. It may be installed on broad `google.com/search` URL patterns for userscript-manager compatibility, but it creates no FAB, badge, panel, styles, export action, or long-running observer on an ordinary Search page. Empty AI Mode home also remains inactive. UI appears only on an AI Mode route after a complete prompt/response turn or a successfully extracted canvas is verified. A visible sandbox iframe alone is not counted as an exportable canvas.
 
@@ -29,7 +29,7 @@ google.com/search (parent page — user sees the canvas here)
 └── (more widgets...)
 ```
 
-For older canvases, the parent-page branch extracts WidgetHelpers HTML from adjacent `TgQPHd` comments. In the newer right-hand Canvas UI, the verified source is hidden under `[data-xid="mnldjf"]` beside `[aria-label="Canvas preview"]`. Inline widgets in the supplied flight-delay thread have neither source in the parent DOM. Their nested HTTPS shim receives the original authored HTML/CSS/module as a trusted parent message before navigating to a blob page. The userscript forwards that bounded source to Google in the same tab. The top page accepts it only from the expected nested/outer frame WindowProxy, an `scf.usercontent.goog` origin, and the active route, then validates its authored module. A nonce-bound request to the blob document is retained as a fallback. No iframe is counted merely because it is visible. Google selectors and userscript-manager frame injection can change; inaccessible previews fail closed.
+For older canvases, the parent-page branch extracts WidgetHelpers HTML from adjacent `TgQPHd` comments. In the newer right-hand Canvas UI, the verified source is hidden under `[data-xid="mnldjf"]` beside `[aria-label="Canvas preview"]`. Some inline widgets have neither source in the parent DOM. Their nested HTTPS shim receives the original authored HTML/CSS/module as a trusted parent message before navigating to a blob page. The userscript forwards that bounded source to Google in the same tab. The top page accepts it only from the expected nested/outer frame WindowProxy, an `scf.usercontent.goog` origin, and the active route, then validates its authored module. A nonce-bound request to the blob document is retained as a fallback. No iframe is counted merely because it is visible. Google selectors and userscript-manager frame injection can change; inaccessible previews fail closed.
 
 ### Detection
 
@@ -84,7 +84,7 @@ Modern side canvases are exported as authored. Inline exports preserve the autho
 
 Conversation filenames use `{Short_Title}_{WEEKDAY}_{MMDDYYYY}_{HHMMSS}-{AM|PM}-{TZ}.md`. Short titles remain as entered; long instruction-like titles use up to five topic words, preserve up to four parenthesized acronyms, and cap the descriptive stem at 60 characters. Filenames remain editable.
 
-The six general checkboxes—conversation inclusion, YAML frontmatter, Turn dates, Dark mode, Full viewport, and Embed metadata—are saved immediately when changed and reused for later threads. Another already-open tab picks up a change the next time its panel opens. Canvas-card selections and Select/Deselect Canvases are remembered only for the same thread; a different thread starts with every canvas selected. Thread titles, filenames, source URL, and export date remain per-export and are not stored. The script stores only booleans and short hashed route/canvas identifiers in Google-origin `localStorage`; it never stores conversation or canvas source there. Browser profiles do not share these settings. Private browsing or blocked/cleared site storage cannot preserve them across restarts; when a write is blocked, a warning appears and settings remain in memory only until the page closes.
+The six general checkboxes—conversation inclusion, YAML frontmatter, Turn dates, Dark mode, Full viewport, and Embed metadata—are saved immediately when changed and reused for later threads. Another already-open tab picks up a change the next time its panel opens. Canvas-card selections and Select/Deselect Canvases are remembered for the same thread, for up to 20 recently changed threads; a new thread starts with every canvas selected. Thread titles, filenames, source URL, and export date remain per-export and are not stored. The script stores only booleans and short hashed route/canvas identifiers in Google-origin `localStorage`; it never stores conversation or canvas source there. Browser profiles do not share these settings. Private browsing or blocked/cleared site storage cannot preserve them across restarts; when a write is blocked, a warning appears and settings remain in memory only until the page closes.
 
 ## Supported Widget APIs
 
@@ -107,6 +107,6 @@ The script detects and correctly handles all six WidgetHelpers entry points:
 
 ## Development and Changelog
 
-1. [Google AI Canvas Exporter Greasy Fork Page](https://greasyfork.org/en/scripts/572688-google-ai-canvas-exporter)
-2. [`lowestprime/google-ai-canvas-exporter` GitHub Repository](https://github.com/lowestprime/google-ai-canvas-exporter)
-3. [`google-ai-canvas-exporter/dev_logs/CHANGELOG.md](https://github.com/lowestprime/google-ai-canvas-exporter/blob/main/dev_logs/CHANGELOG.md)
+- [Install on Greasy Fork](https://greasyfork.org/en/scripts/572688-google-ai-canvas-exporter)
+- [Browse the source on GitHub](https://github.com/lowestprime/google-ai-canvas-exporter)
+- [Read the changelog](https://github.com/lowestprime/google-ai-canvas-exporter/blob/main/dev_logs/CHANGELOG.md)

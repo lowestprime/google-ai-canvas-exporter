@@ -10,7 +10,7 @@ const userscript = readFileSync(resolve(root, 'userscript/Google_AI_Canvas_Expor
 export function loadUserscript(
     html,
     url = 'https://www.google.com/search?udm=50&q=fixture',
-    { testMode = true } = {}
+    { testMode = true, storage } = {}
 ) {
     const virtualConsole = new VirtualConsole();
     const dom = new JSDOM(html, {
@@ -19,6 +19,7 @@ export function loadUserscript(
         pretendToBeVisual: true,
         virtualConsole
     });
+    if (storage) Object.defineProperty(dom.window, 'localStorage', { value: storage });
     if (testMode) dom.window.__GCE_TEST_MODE__ = true;
     dom.window.eval(userscript);
     return { dom, window: dom.window, document: dom.window.document, api: dom.window.__GCE_TEST_API__ };
