@@ -1,10 +1,26 @@
 ---
-title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.10"
+title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.11"
 date: 2026-09-28
 source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 ---
 
 # Changelog
+
+## Version 5.0.11
+2026-09-28
+
+The supplied ten-file v5.0.10 archive confirms date on/off output and matching Chrome/Firefox long-thread Markdown, but shows that an unnamed inline canvas can change from `Interactive Canvas 1` to `Interactive Canvas 2` between exports. Panel checkboxes also reset whenever the panel is rebuilt.
+
+| Change | Why it matters |
+|---|---|
+| Remember general export options | Conversation inclusion, YAML, Turn dates, theme, viewport, and metadata restore after panel reopen or browser restart when site storage is available. |
+| Scope canvas selections to a thread | A deselected canvas stays deselected in that thread, including after reload; unrelated threads start fully selected. Late-discovered canvases honor a saved Deselect All choice, and Canvases Only now respects unchecked cards. |
+| Stabilize unnamed inline labels | Number anonymous inline canvases from their page order when available, independent of source-message arrival order. |
+| Handle blocked storage | Keep current-page choices in memory and show one warning instead of breaking the exporter. No conversation or canvas source is persisted. |
+
+See `dev_logs/archive_validation_v5.0.10_2026-09-28.md` for the entry-by-entry archive assessment. Live v5.0.11 browser-restart validation remains outstanding.
+
+---
 
 ## Version 5.0.10
 2026-09-28
