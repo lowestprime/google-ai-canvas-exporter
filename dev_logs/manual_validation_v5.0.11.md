@@ -1,6 +1,6 @@
 # v5.0.11 manual validation — remembered exporter settings
 
-Status (2026-09-28 PDT): automated checks pass; the supplied ZIP contains v5.0.10 exports, not a v5.0.11 restart replay. Signed-in Chrome Beta v5.0.11 installation/restart results are awaiting user confirmation. Firefox is no longer a live-test target for this change, per the user.
+Status (2026-09-28 PDT): automated checks pass; the supplied ZIP contains v5.0.10 exports, not a v5.0.11 restart replay. Signed-in Chrome Beta v5.0.11 installation/restart results are awaiting user confirmation. Firefox is no longer a live-test target for this change, per the user. The available browser-control surface blocks the Tampermonkey extension page, so it cannot install or inspect the script there.
 
 ## Automated evidence
 

@@ -13,10 +13,17 @@ const modernCanvasMixed = readRepoFile('test/fixtures/modern-canvas-mixed.html')
 const inlineCanvasMixed = readRepoFile('test/fixtures/inline-canvas-mixed.html');
 const inlineCanvasOnly = readRepoFile('test/fixtures/inline-canvas-only.html');
 const plain = value => JSON.parse(JSON.stringify(value));
+const sharedStorage = () => {
+    const values = new Map();
+    return {
+        getItem: key => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, String(value))
+    };
+};
 
 test('userscript metadata targets HTTPS shims without a broad blob regex include', () => {
     const source = readRepoFile('userscript/Google_AI_Canvas_Exporter.user.js');
-    assert.match(source, /@version\s+5\.0\.10/);
+    assert.match(source, /@version\s+5\.0\.11/);
     assert.match(source, /@match\s+https:\/\/\*\.scf\.usercontent\.goog\/search-sandbox\/shim\.html\*/);
     assert.doesNotMatch(source, /@include\s+\/\^blob:/);
     assert.match(source, /@grant\s+none/);
@@ -238,7 +245,7 @@ test('Markdown conversion matches the golden structure and strips Google UI nois
         srcURL: 'https://example.com/a:b'
     });
     assert.match(frontmatter, /^---\ntitle: "Fixture: \\"quoted\\""\nsource: "https:\/\/example\.com\/a:b"/);
-    assert.match(frontmatter, /\nturns: 1\nexporter: Google AI Canvas Exporter v5\.0\.10\n---/);
+    assert.match(frontmatter, /\nturns: 1\nexporter: Google AI Canvas Exporter v5\.0\.11\n---/);
     dom.window.close();
 });
 
@@ -368,7 +375,7 @@ test('canvas reconstruction preserves v4 compatibility invariants', () => {
         meta: true,
         srcURL: 'https://www.google.com/search?q=canvas'
     });
-    assert.match(output, /Google AI Canvas Exporter v5\.0\.10/);
+    assert.match(output, /Google AI Canvas Exporter v5\.0\.11/);
     assert.match(output, /window\.WidgetHelpers/);
     for (const signature of ['WH.createApp', 'WH.initCanvas', 'WH.initD3', 'WH.initPlot', 'WH.initThree', 'WH.initPhysics']) {
         assert.match(output, new RegExp(signature.replace('.', '\\.')));
@@ -476,7 +483,7 @@ test('Formal Classification mixed-content fixture exports all segments, canvas, 
         turnDates: true,
         srcURL: url
     });
-    assert.match(markdown, /\nturns: 2\nexporter: Google AI Canvas Exporter v5\.0\.10\n---/);
+    assert.match(markdown, /\nturns: 2\nexporter: Google AI Canvas Exporter v5\.0\.11\n---/);
     assert.equal((markdown.match(/You said:/g) || []).length, 2);
     assert.match(markdown, /Splaying the legs mechanically expands the Base of Support/);
     assert.match(markdown, /The stability of your walnut stool is governed by the relationship/);
@@ -540,7 +547,7 @@ test('new Canvas UI exports authored HTML on a canvas-only AI Mode page', () => 
     const html = api.buildCanvasExportHTML(canvas, {
         title: canvas.title, srcURL: url, meta: true, isDark: false, fullVP: false
     });
-    assert.match(html, /Google AI Canvas Exporter v5\.0\.10/);
+    assert.match(html, /Google AI Canvas Exporter v5\.0\.11/);
     assert.match(html, /cdn\.tailwindcss\.com/);
     assert.match(html, /function switchTab\(\)/);
     assert.match(html, /bg-slate-950/);
@@ -551,6 +558,154 @@ test('new Canvas UI exports authored HTML on a canvas-only AI Mode page', () => 
     assert.equal(exported.window.document.querySelector('main').dataset.active, 'yes');
     exported.window.close();
     api.stopCanvasObserver();
+    dom.window.close();
+});
+
+test('export checkbox preferences survive panel reopen and a new page instance', async () => {
+    const storage = sharedStorage();
+    const url = 'https://www.google.com/search?udm=50&q=preferences';
+    const first = loadUserscript(modernCanvasMixed, url, { storage });
+    first.api.captureMountedTurns();
+    first.api.scanCanvases(first.document);
+    const panel = first.api.openExportPanel();
+    const ids = ['gce-inc-conv', 'gce-md-fm', 'gce-md-dates',
+        'gce-dark', 'gce-full', 'gce-html-meta'];
+    for (const id of ids) {
+        const box = panel.querySelector(`#${id}`);
+        assert.equal(box.checked, true, `${id} must default on`);
+        box.checked = false;
+        box.dispatchEvent(new first.window.Event('change', { bubbles: true }));
+    }
+    const saved = JSON.parse(storage.getItem('gce.exportPreferences.v1'));
+    assert.equal(saved.version, 1);
+    assert.deepEqual(Object.values(saved.options), Array(6).fill(false));
+    assert.doesNotMatch(JSON.stringify(saved), /Build a dashboard|widgetHTML|source:|https:\/\//);
+    panel.querySelector('.gce-x').click();
+    const reopened = first.api.openExportPanel();
+    for (const id of ids) assert.equal(reopened.querySelector(`#${id}`).checked, false);
+    reopened.querySelector('#gce-refresh-preview').click();
+    assert.doesNotMatch(reopened.querySelector('#gce-md-preview').value, /^---/);
+    await first.api.hydrateConversation();
+    reopened.querySelector('.gce-x').click();
+    first.dom.window.close();
+
+    const second = loadUserscript(modernCanvasMixed, url, { storage });
+    second.api.captureMountedTurns();
+    second.api.scanCanvases(second.document);
+    const restored = second.api.openExportPanel();
+    for (const id of ids) assert.equal(restored.querySelector(`#${id}`).checked, false);
+    await second.api.hydrateConversation();
+    restored.querySelector('.gce-x').click();
+    second.dom.window.close();
+});
+
+test('another open tab reloads preferences after a storage event', async () => {
+    const storage = sharedStorage();
+    const url = 'https://www.google.com/search?udm=50&q=two-tabs';
+    const one = loadUserscript(modernCanvasMixed, url, { storage });
+    const two = loadUserscript(modernCanvasMixed, url, { storage });
+    for (const tab of [one, two]) {
+        tab.api.captureMountedTurns();
+        tab.api.scanCanvases(tab.document);
+    }
+    const oldPanel = two.api.openExportPanel();
+    assert.equal(oldPanel.querySelector('#gce-md-dates').checked, true);
+    await two.api.hydrateConversation();
+    oldPanel.querySelector('.gce-x').click();
+
+    const panel = one.api.openExportPanel();
+    const box = panel.querySelector('#gce-md-dates');
+    box.checked = false;
+    box.dispatchEvent(new one.window.Event('change', { bubbles: true }));
+    await one.api.hydrateConversation();
+    panel.querySelector('.gce-x').click();
+    two.window.dispatchEvent(new two.window.StorageEvent('storage',
+        { key: 'gce.exportPreferences.v1' }));
+    const refreshed = two.api.openExportPanel();
+    assert.equal(refreshed.querySelector('#gce-md-dates').checked, false);
+    await two.api.hydrateConversation();
+    refreshed.querySelector('.gce-x').click();
+    one.dom.window.close();
+    two.dom.window.close();
+});
+
+test('canvas inclusion persists for one thread without affecting another', async () => {
+    const storage = sharedStorage();
+    const open = async q => {
+        const result = loadUserscript(modernCanvasMixed,
+            `https://www.google.com/search?udm=50&q=${q}`, { storage });
+        result.api.captureMountedTurns();
+        result.api.scanCanvases(result.document);
+        const panel = result.api.openExportPanel();
+        await result.api.hydrateConversation();
+        return { ...result, panel };
+    };
+    const first = await open('first-thread');
+    assert.equal(first.panel.querySelector('.gce-canvas-cb').checked, true);
+    first.panel.querySelector('#gce-canvas-toggle').click();
+    assert.equal(first.panel.querySelector('.gce-canvas-cb').checked, false);
+    assert.equal(first.panel.querySelector('#gce-canvas-toggle').textContent, 'Select Canvases');
+    first.panel.querySelector('.gce-x').click();
+    first.dom.window.close();
+
+    const other = await open('another-thread');
+    assert.equal(other.panel.querySelector('.gce-canvas-cb').checked, true);
+    other.panel.querySelector('.gce-x').click();
+    other.dom.window.close();
+
+    const same = await open('first-thread');
+    const card = same.panel.querySelector('.gce-canvas-cb');
+    assert.equal(card.checked, false);
+    card.checked = true;
+    card.dispatchEvent(new same.window.Event('change', { bubbles: true }));
+    assert.equal(same.panel.querySelector('#gce-canvas-toggle').textContent, 'Deselect Canvases');
+    same.panel.querySelector('.gce-x').click();
+    same.dom.window.close();
+
+    const restored = await open('first-thread');
+    assert.equal(restored.panel.querySelector('.gce-canvas-cb').checked, true);
+    restored.panel.querySelector('.gce-x').click();
+    restored.dom.window.close();
+});
+
+test('blocked storage retains current-page settings without breaking export UI', async () => {
+    const storage = {
+        getItem: () => { throw new Error('storage blocked'); },
+        setItem: () => { throw new Error('storage blocked'); }
+    };
+    const { dom, api, document, window } = loadUserscript(modernCanvasMixed,
+        'https://www.google.com/search?udm=50&q=blocked', { storage });
+    api.captureMountedTurns();
+    api.scanCanvases(document);
+    const panel = api.openExportPanel();
+    const box = panel.querySelector('#gce-md-dates');
+    box.checked = false;
+    box.dispatchEvent(new window.Event('change', { bubbles: true }));
+    assert.match(document.querySelector('.gce-toast').textContent, /Browser storage is blocked/);
+    panel.querySelector('.gce-x').click();
+    const reopened = api.openExportPanel();
+    assert.equal(reopened.querySelector('#gce-md-dates').checked, false);
+    await api.hydrateConversation();
+    reopened.querySelector('.gce-x').click();
+    dom.window.close();
+});
+
+test('malformed stored preferences cannot change defaults or break the panel', async () => {
+    const storage = sharedStorage();
+    storage.setItem('gce.exportPreferences.v1', JSON.stringify({ version: 1,
+        options: { turnDates: 'false', darkMode: false, frontmatter: 0 },
+        routes: [{ key: 'not a route', all: false, overrides: { arbitrary: false } }] }));
+    const { dom, api, document } = loadUserscript(modernCanvasMixed,
+        'https://www.google.com/search?udm=50&q=malformed', { storage });
+    api.captureMountedTurns();
+    api.scanCanvases(document);
+    const panel = api.openExportPanel();
+    assert.equal(panel.querySelector('#gce-md-dates').checked, true);
+    assert.equal(panel.querySelector('#gce-md-fm').checked, true);
+    assert.equal(panel.querySelector('#gce-dark').checked, false);
+    assert.equal(panel.querySelector('.gce-canvas-cb').checked, true);
+    await api.hydrateConversation();
+    panel.querySelector('.gce-x').click();
     dom.window.close();
 });
 
@@ -711,6 +866,69 @@ test('inline sandbox messages register two distinct canvases and refresh a mixed
     await api.hydrateConversation();
     panel.querySelector('.gce-x').click();
     api.stopCanvasObserver();
+    dom.window.close();
+});
+
+test('late inline canvases inherit a thread-specific deselect-all preference', async () => {
+    const storage = sharedStorage();
+    const { dom, api, document } = loadUserscript(inlineCanvasMixed,
+        'https://www.google.com/search?udm=50&q=late-canvases', { storage });
+    api.resetRouteState(api.deriveRouteKey());
+    api.scanCanvases(document);
+    api.captureMountedTurns();
+    const pending = api.getPendingInlineChallenges();
+    assert.equal(pending.length, 2);
+    const deliver = (challenge, label) => api.receiveInlineCanvasMessage({
+        source: challenge.iframe.contentWindow, origin: challenge.origin,
+        data: { channel: 'gce-inline-canvas-v1', kind: 'source', nonce: challenge.nonce,
+            route: challenge.route, html: inlineHTML(label) }
+    });
+    assert.equal(deliver(pending[0], 'First canvas'), true);
+    const panel = api.openExportPanel();
+    assert.equal(panel.querySelectorAll('.gce-canvas-cb').length, 1);
+    panel.querySelector('#gce-canvas-toggle').click();
+    const late = api.getPendingInlineChallenges().find(challenge =>
+        challenge.iframe === pending[1].iframe);
+    assert.ok(late);
+    assert.equal(deliver(late, 'Second canvas'), true);
+    assert.equal(panel.querySelectorAll('.gce-canvas-cb').length, 2);
+    assert.ok([...panel.querySelectorAll('.gce-canvas-cb')].every(box => !box.checked));
+    await api.hydrateConversation();
+    panel.querySelector('.gce-x').click();
+    dom.window.close();
+});
+
+test('Canvases Only respects persisted per-canvas checkboxes', async () => {
+    const { dom, api, document, window } = loadUserscript(inlineCanvasMixed);
+    api.resetRouteState(api.deriveRouteKey());
+    const frames = [...document.querySelectorAll('.MngkG iframe.lQ27pc')];
+    api.registerInlineCanvasSource(frames[0], inlineHTML('First canvas'));
+    api.registerInlineCanvasSource(frames[1], inlineHTML('Second canvas'));
+    api.captureMountedTurns();
+    const panel = api.openExportPanel();
+    await api.hydrateConversation();
+    const first = panel.querySelector('.gce-canvas-cb[data-idx="0"]');
+    first.checked = false;
+    first.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const downloads = [];
+    window.URL.createObjectURL = () => 'blob:fixture';
+    window.URL.revokeObjectURL = () => {};
+    window.HTMLAnchorElement.prototype.click = function () { downloads.push(this.download); };
+    panel.querySelector('#gce-canvas-only').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(downloads.length, 1);
+    assert.match(downloads[0], /Second_canvas/i);
+    dom.window.close();
+});
+
+test('anonymous inline canvas names follow page order when sources arrive out of order', () => {
+    const { dom, api, document } = loadUserscript(inlineCanvasMixed);
+    api.resetRouteState(api.deriveRouteKey());
+    const frames = [...document.querySelectorAll('.MngkG iframe.lQ27pc')];
+    api.registerInlineCanvasSource(frames[1], emptyMountHTML());
+    api.registerInlineCanvasSource(frames[0], emptyMountHTML());
+    assert.deepEqual(plain(api.getRegistry().map(canvas => canvas.title)),
+        ['Interactive Canvas 2', 'Interactive Canvas 1']);
     dom.window.close();
 });
 
