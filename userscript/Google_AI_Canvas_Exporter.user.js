@@ -4,7 +4,7 @@
 // @author            lowestprime x Claude Opus 4.6 Max Agent
 // @namespace         https://greasyfork.org/en/users/823161-lowestprime
 // @license           MIT
-// @version           5.0.9
+// @version           5.0.10
 // @match             *://www.google.com/search*
 // @match             *://*.google.com/search*
 // @match             https://*.scf.usercontent.goog/search-sandbox/shim.html*
@@ -17,7 +17,7 @@
     'use strict';
 
     const TAG = '[GCE]';
-    const VERSION = '5.0.9';
+    const VERSION = '5.0.10';
     const INLINE_MESSAGE = 'gce-inline-canvas-v1';
     const MAX_INLINE_HTML = 5_000_000;
 
@@ -794,12 +794,12 @@
     }
 
     function fencedCode(body, language = '') {
-        const code = String(body || '').replace(/\r\n?/g, '\n');
+        const code = String(body || '').replace(/\r\n?/g, '\n').replace(/(?:\n[ \t]*)+$/, '');
         let longest = 0;
         for (const match of code.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
         const fence = '`'.repeat(Math.max(3, longest + 1));
         const lang = String(language || '').trim().match(/^[a-zA-Z0-9_+.-]+$/)?.[0] || '';
-        return `\n${fence}${lang}\n${code}${code.endsWith('\n') ? '' : '\n'}${fence}\n\n`;
+        return `\n${fence}${lang}\n${code}\n${fence}\n\n`;
     }
 
     function prepareCloneForMarkdown(root) {
@@ -874,7 +874,7 @@
                 return `[${escInline(label)}](${href})`;
             }
 
-            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"], div.ncoeY, div.xM049c.BAlmad, [role="heading"][aria-level]')) {
+            if (/^h[1-6]$/.test(tag) || el.matches('div.AdPoic[role="heading"], div.ncoeY, div.xM049c.BAlmad, [role="heading"]')) {
                 const ariaLevel = Number(el.getAttribute('aria-level'));
                 const lvl = /^h[1-6]$/.test(tag) ? Number(tag[1]) :
                     Number.isInteger(ariaLevel) && ariaLevel >= 2 ? Math.min(6, ariaLevel - 1) : 2;

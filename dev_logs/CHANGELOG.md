@@ -1,10 +1,25 @@
 ---
-title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.9"
+title: "Google AI Canvas Exporter – Changelog and Version History v1.0.0–5.0.10"
 date: 2026-09-28
 source: https://greasyfork.org/en/scripts/google-ai-canvas-exporter
 ---
 
 # Changelog
+
+## Version 5.0.10
+2026-09-28
+
+The follow-up [Greasy Fork report](https://greasyfork.org/en/scripts/572688-google-ai-canvas-exporter/discussions/339322#comment-669234) provided a concrete v5.0.8 example of plain response headings, code languages outside fences, caution footers, and extra blank lines inside fences. v5.0.9 had already addressed the language/footer behavior; a new two-turn regression fixture isolated the remaining heading and trailing-newline defects.
+
+| Change | Why it matters |
+|---|---|
+| Generic response headings | Treat `role="heading"` as a heading even without an `aria-level` or current Google class; prompt chrome is not part of the response converter. |
+| Clean code fence endings | Drop surplus trailing newlines from Google's `<pre><code>` source before writing the matching closing fence. Authored interior blank lines remain intact. |
+| Turn-date and code regression | Verify two code-containing turns with Turn dates on and off, including date-like text inside a code block, citations, and list-contained language-labelled fences. |
+
+The quoted report is v5.0.8 evidence, not proof that v5.0.10 has passed live replay. Inline/side/legacy canvas paths, grants, and network behavior are unchanged. See `dev_logs/manual_validation_v5.0.10.md`.
+
+---
 
 ## Version 5.0.9
 2026-09-28

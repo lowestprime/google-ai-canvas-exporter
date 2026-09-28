@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import { loadUserscript, readRepoFile } from './load-userscript.mjs';
 
 const formattingFixture = readRepoFile('test/fixtures/conversation-formatting.html');
+const codeWidgetFixture = readRepoFile('test/fixtures/code-widget-headings-dates.html');
 const virtualOne = readRepoFile('test/fixtures/virtual-turn-1.html');
 const virtualTwo = readRepoFile('test/fixtures/virtual-turn-2.html');
 const formalFixture = readRepoFile('dev_artifacts/Single_File_Export_Formal_Classification_of_Fine_Hardwood_Furniture_Google_Search_07042026_114124_AM-PST.html');
@@ -15,7 +16,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 test('userscript metadata targets HTTPS shims without a broad blob regex include', () => {
     const source = readRepoFile('userscript/Google_AI_Canvas_Exporter.user.js');
-    assert.match(source, /@version\s+5\.0\.9/);
+    assert.match(source, /@version\s+5\.0\.10/);
     assert.match(source, /@match\s+https:\/\/\*\.scf\.usercontent\.goog\/search-sandbox\/shim\.html\*/);
     assert.doesNotMatch(source, /@include\s+\/\^blob:/);
     assert.match(source, /@grant\s+none/);
@@ -237,7 +238,7 @@ test('Markdown conversion matches the golden structure and strips Google UI nois
         srcURL: 'https://example.com/a:b'
     });
     assert.match(frontmatter, /^---\ntitle: "Fixture: \\"quoted\\""\nsource: "https:\/\/example\.com\/a:b"/);
-    assert.match(frontmatter, /\nturns: 1\nexporter: Google AI Canvas Exporter v5\.0\.9\n---/);
+    assert.match(frontmatter, /\nturns: 1\nexporter: Google AI Canvas Exporter v5\.0\.10\n---/);
     dom.window.close();
 });
 
@@ -280,6 +281,34 @@ test('adjacent citations, nested emphasis, and literal code fences remain valid 
     assert.match(preview, /<li>Run the command:<pre><code data-language="powershell">Get-Service Bonjour\nRestart-Service Bonjour<\/code><\/pre><\/li>/);
     assert.doesNotMatch(preview, /Use code with caution|Copy code/);
     assert.match(preview, /<pre><code data-language="js">const fence = &quot;```&quot;;\n```\nconst answer = 42;<\/code><\/pre>/);
+    dom.window.close();
+});
+
+test('generic response headings and code widgets keep turn dates outside balanced list fences', () => {
+    const { dom, api } = loadUserscript(codeWidgetFixture);
+    const turns = api.extractConversationTurns();
+    assert.equal(turns.length, 2);
+    const withDates = api.buildConversationMarkdown({ turns, frontmatter: false, turnDates: true });
+    const withoutDates = api.buildConversationMarkdown({ turns, frontmatter: false, turnDates: false });
+
+    assert.match(withDates, /You said: Show two solutions\n\n2026-09-28T10:00:00-07:00\n\n## Solution 1: Configuration/);
+    assert.match(withDates, /## Solution 2: Verification/);
+    assert.match(withDates, /## Next steps/);
+    assert.match(withDates, /Use this setting\. \[1\]\(https:\/\/example\.com\/guide\)/);
+    assert.match(withDates, /1\. Save the configuration:\n\s+```toml\n\s+\[settings\]\n\s+date = "2026-09-28"\n\s+```/);
+    assert.match(withDates, /2\. Run the command:\n\s+```bash\n\s+echo ready\n\s+```/);
+    assert.doesNotMatch(withDates, /date = "2026-09-28"\n\s*\n\s+```|Use code with caution|Copy code|\ntoml\n|\nbash\n/);
+    assert.equal((withDates.match(/2026-09-28T10:00:00-07:00/g) || []).length, 1);
+    assert.equal((withDates.match(/2026-09-28T10:05:00-07:00/g) || []).length, 1);
+    assert.doesNotMatch(withoutDates, /2026-09-28T10:00:00-07:00|2026-09-28T10:05:00-07:00/);
+    assert.match(withoutDates, /date = "2026-09-28"/);
+    assert.equal((withoutDates.match(/```(?:toml|bash)?/g) || []).length, 4);
+
+    const preview = api.renderMarkdownPreview(withDates);
+    assert.ok(preview.indexOf('2026-09-28T10:00:00-07:00') < preview.indexOf('<h2>Solution 1: Configuration</h2>'));
+    assert.match(preview, /<h2>Solution 1: Configuration<\/h2>/);
+    assert.match(preview, /<li>Save the configuration:<pre><code data-language="toml">\[settings\]\ndate = &quot;2026-09-28&quot;<\/code><\/pre><\/li>/);
+    assert.match(preview, /<h2>Next steps<\/h2>/);
     dom.window.close();
 });
 
@@ -339,7 +368,7 @@ test('canvas reconstruction preserves v4 compatibility invariants', () => {
         meta: true,
         srcURL: 'https://www.google.com/search?q=canvas'
     });
-    assert.match(output, /Google AI Canvas Exporter v5\.0\.9/);
+    assert.match(output, /Google AI Canvas Exporter v5\.0\.10/);
     assert.match(output, /window\.WidgetHelpers/);
     for (const signature of ['WH.createApp', 'WH.initCanvas', 'WH.initD3', 'WH.initPlot', 'WH.initThree', 'WH.initPhysics']) {
         assert.match(output, new RegExp(signature.replace('.', '\\.')));
@@ -447,7 +476,7 @@ test('Formal Classification mixed-content fixture exports all segments, canvas, 
         turnDates: true,
         srcURL: url
     });
-    assert.match(markdown, /\nturns: 2\nexporter: Google AI Canvas Exporter v5\.0\.9\n---/);
+    assert.match(markdown, /\nturns: 2\nexporter: Google AI Canvas Exporter v5\.0\.10\n---/);
     assert.equal((markdown.match(/You said:/g) || []).length, 2);
     assert.match(markdown, /Splaying the legs mechanically expands the Base of Support/);
     assert.match(markdown, /The stability of your walnut stool is governed by the relationship/);
@@ -511,7 +540,7 @@ test('new Canvas UI exports authored HTML on a canvas-only AI Mode page', () => 
     const html = api.buildCanvasExportHTML(canvas, {
         title: canvas.title, srcURL: url, meta: true, isDark: false, fullVP: false
     });
-    assert.match(html, /Google AI Canvas Exporter v5\.0\.9/);
+    assert.match(html, /Google AI Canvas Exporter v5\.0\.10/);
     assert.match(html, /cdn\.tailwindcss\.com/);
     assert.match(html, /function switchTab\(\)/);
     assert.match(html, /bg-slate-950/);
